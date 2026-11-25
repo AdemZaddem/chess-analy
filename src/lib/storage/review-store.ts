@@ -75,6 +75,103 @@ export function describeStorageError(error: unknown): string {
   return "Local storage is unavailable in this browser.";
 }
 
+export type ReviewImportConflictReason =
+  | "newer-existing"
+  | "more-complete-existing"
+  | "different-settings";
+
+export interface ReviewImportConflict {
+  reasons: ReviewImportConflictReason[];
+  existing: StoredReviewRecord;
+  incoming: StoredReviewRecord;
+  message: string;
+}
+
+function progressPercent(record: StoredReviewRecord): number {
+  const percent = record.lastProgress?.percent ?? 0;
+  return Number.isFinite(percent) ? Math.min(1, Math.max(0, percent)) : 0;
+}
+
+function completenessScore(record: StoredReviewRecord): number {
+  if (record.analysisState === "complete" && record.analysis) return 2;
+  if (record.analysisState === "incomplete" || record.analysisState === "running") {
+    return 1 + progressPercent(record);
+  }
+  return progressPercent(record) > 0 ? 1 + progressPercent(record) : 0;
+}
+
+function describeCompleteness(record: StoredReviewRecord): string {
+  if (record.analysisState === "complete" && record.analysis) return "a completed analysis";
+  if (record.analysisState === "incomplete" || record.analysisState === "running") {
+    return `partial analysis (${Math.round(progressPercent(record) * 100)}%)`;
+  }
+  return "no analysis";
+}
+
+/**
+ * A replacement is only considered safe when the incoming record is not older,
+ * not less complete, and uses the same analysis settings. Any mismatch is
+ * surfaced to the user instead of silently dropping local work.
+ */
+export function getReviewImportConflict(
+  existing: StoredReviewRecord,
+  incoming: StoredReviewRecord,
+): ReviewImportConflict | null {
+  const reasons: ReviewImportConflictReason[] = [];
+  if (incoming.updatedAt < existing.updatedAt) reasons.push("newer-existing");
+  if (completenessScore(existing) > completenessScore(incoming)) {
+    reasons.push("more-complete-existing");
+  }
+  if (JSON.stringify(existing.settings) !== JSON.stringify(incoming.settings)) {
+    reasons.push("different-settings");
+  }
+  if (reasons.length === 0) return null;
+
+  const details: string[] = [];
+  if (reasons.includes("newer-existing")) {
+    details.push(
+      `The saved review was updated more recently (${new Date(existing.updatedAt).toISOString()}) than the imported one (${new Date(incoming.updatedAt).toISOString()}).`,
+    );
+  }
+  if (reasons.includes("more-complete-existing")) {
+    details.push(
+      `The saved review has ${describeCompleteness(existing)}; the imported review has ${describeCompleteness(incoming)}.`,
+    );
+  }
+  if (reasons.includes("different-settings")) {
+    details.push(
+      `The saved review uses ${existing.settings.preset} settings; the imported review uses ${incoming.settings.preset} settings.`,
+    );
+  }
+  return {
+    reasons,
+    existing,
+    incoming,
+    message: `A saved review for this game already exists. ${details.join(" ")} Replace it with the imported review? Choose Cancel to keep the existing review.`,
+  };
+}
+
+/** A missing or damaged local record is not a conflict; other errors propagate. */
+export async function getExistingReview(
+  store: ReviewStore,
+  id: string,
+): Promise<StoredReviewRecord | null> {
+  try {
+    return await store.get(id);
+  } catch (error) {
+    if (error instanceof ReviewStorageError && error.code === "corrupt") return null;
+    throw error;
+  }
+}
+
+export async function getExistingReviewConflict(
+  store: ReviewStore,
+  incoming: StoredReviewRecord,
+): Promise<ReviewImportConflict | null> {
+  const existing = await getExistingReview(store, incoming.id);
+  return existing ? getReviewImportConflict(existing, incoming) : null;
+}
+
 /** In-memory implementation used by tests and as a last-resort UI fallback. */
 export class MemoryReviewStore implements ReviewStore {
   private readonly records = new Map<string, StoredReviewRecord>();
@@ -265,17 +362,15 @@ export async function saveGameReview(
     analysis?: FullGameAnalysis | null;
     analysisState?: ReviewAnalysisState;
     lastProgress?: ReviewProgressSnapshot;
+    /** Preserve the provenance of an explicitly confirmed imported review. */
+    timestamps?: Pick<
+      StoredReviewRecord,
+      "createdAt" | "updatedAt" | "lastAccessedAt"
+    >;
   },
 ): Promise<StoredReviewRecord> {
   const id = createReviewId(options.game);
-  let existing: StoredReviewRecord | null = null;
-  try {
-    existing = await store.get(id);
-  } catch (error) {
-    if (!(error instanceof ReviewStorageError) || error.code !== "corrupt") {
-      throw error;
-    }
-  }
+  const existing = await getExistingReview(store, id);
 
   const now = Date.now();
   const record = createReviewRecord({
@@ -284,9 +379,9 @@ export async function saveGameReview(
     analysis: options.analysis ?? null,
     analysisState: options.analysisState,
     lastProgress: options.lastProgress,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-    lastAccessedAt: now,
+    createdAt: options.timestamps?.createdAt ?? existing?.createdAt ?? now,
+    updatedAt: options.timestamps?.updatedAt ?? now,
+    lastAccessedAt: options.timestamps?.lastAccessedAt ?? now,
   });
   await store.save(record);
   return record;

@@ -18,7 +18,11 @@ check the `LICENSE` files in the installed packages before redistribution.
 
 ## Application source license
 
+MoveLens is free for users to run and use; no account, subscription or paid API
+is required. Free use does not imply a source-code license.
+
 No root `LICENSE` file has been selected for the MoveLens application source.
 Do not infer redistribution rights for the application code from this document.
 The GPL-3.0 obligations for the bundled Stockfish assets apply separately and
-must be honored if those assets are distributed publicly.
+must be honored if those assets are distributed publicly. They do not select a
+license for the rest of the application.

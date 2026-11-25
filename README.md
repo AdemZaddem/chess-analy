@@ -19,6 +19,34 @@ Imported games are saved in browser IndexedDB; completed reviews can be reopened
 without another engine run, shared as a PGN-only URL fragment, or exported as a
 versioned JSON file.
 
+## Naming
+
+**MoveLens** is the product name shown in the page title, landing page,
+documentation, User-Agent and user-facing messages. `chess-analy` remains the
+repository/package name in `package.json` and is not presented as a separate
+product. The lowercase technical identifiers `movelens` (IndexedDB database),
+`movelens-board` (DOM id) and `movelens-review` (export format) are intentional
+stable identifiers, not leftover branding; changing them would require schema
+and compatibility handling.
+
+## Licensing and free use
+
+MoveLens is free to use: there are no accounts, subscriptions, paid APIs or
+required secrets for the features described here.
+
+The application source code does **not** yet have a selected license. No root
+`LICENSE` file should be inferred from this README or from
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md); redistribution terms for the
+application code are undecided.
+
+The bundled Stockfish 19 Lite WASM engine is **GPL-3.0**. Its provenance, hashes,
+source links and distribution obligations are recorded in
+`public/engine/ENGINE_LICENSES.md`, with the full GPL text in
+`public/engine/COPYING.txt`. Publicly distributing the application together with
+those assets requires satisfying the engine's Corresponding Source obligations.
+That obligation applies to the Stockfish assets and does not choose a license
+for the rest of the application.
+
 ## Scope
 
 Implemented:
@@ -605,6 +633,15 @@ accepted only when
 mismatched or structurally damaged snapshots are dropped and shown as
 incomplete, never as a completed review.
 
+When an import resolves to an existing deterministic ID, the candidate record
+is compared with the saved record using `updatedAt`, analysis completeness
+(including partial progress) and analysis settings. A replacement is automatic
+only when the incoming record is not older, not less complete and uses the same
+settings. Otherwise a confirmation explains the specific risk, with **OK** to
+replace and **Cancel** to keep the saved record untouched. A confirmed
+review-file import keeps the file's `createdAt`, `updatedAt` and
+`lastAccessedAt` values so provenance is not rewritten.
+
 ### Saved games and reviews
 
 The **My reviews** entry appears in the import view when at least one saved game
@@ -621,7 +658,9 @@ update the corresponding record.
 **Copy share link** and native **Share** generate
 `#review=v1.<g|p>.<base64url>`:
 
-- `g` is gzip via `CompressionStream`; `p` is plain base64url fallback.
+- `g` is gzip via `CompressionStream`; `p` is plain base64url. Gzip links are
+  created only when both `CompressionStream` and `DecompressionStream` exist, so
+  a browser never emits a link it cannot decode.
 - The payload contains `v`, PGN, preset, depth, minimal player/date/result
   metadata and, for Chess.com games, only game type and ID. It contains **no
   analysis snapshot**, username, game URL, account data or server reference.
@@ -631,7 +670,9 @@ update the corresponding record.
   characters**; oversized games are told to export a review file instead.
 - Opening validates version, encoding, base64url characters, JSON shape,
   settings, PGN and single-game content. Malformed, unsupported, oversized,
-  compressed-over-1,000,000-byte and multi-game links produce clear errors.
+  compressed-over-1,000,000-byte and multi-game links produce clear errors. An
+  unsupported browser opening a gzip link is told to request a plain link or an
+  exported review file instead of failing silently.
 
 ### Export and import
 
@@ -647,10 +688,13 @@ game, while a bundle may carry a completed review.
 ### Browser and deployment requirements
 
 Saved reviews need IndexedDB. Analysis needs Web Workers, WebAssembly,
-`MessageChannel`, `AbortController` and `Intl`; export/import uses `File.text()`.
-`CompressionStream` / `DecompressionStream` are optional for creating and
-reading compressed links, with plain-link fallback. The single-threaded Stockfish build
-does **not** need `SharedArrayBuffer`, COOP or COEP headers.
+`MessageChannel`, `AbortController` and `Intl`. Import/export and sharing also
+need `File.text()`, `Blob`/`Response` streams, `URL`, `TextEncoder`/`TextDecoder`
+and `atob`/`btoa`. Plain share links work without compression APIs. Creating
+gzip links requires **both** `CompressionStream` and `DecompressionStream`;
+opening a gzip link requires `DecompressionStream` and otherwise shows an
+explicit error. No extra sharing dependency is added. The single-threaded
+Stockfish build does **not** need `SharedArrayBuffer`, COOP or COEP headers.
 
 Production must run `pnpm build` followed by `pnpm start` because the Chess.com
 import route is server-side; a static export is not available without replacing
@@ -704,8 +748,10 @@ Additional observed evidence:
 - Node.js 22.12+, 24+, or 26+ (Vitest 5 requirement; Next.js 16 needs 20.9+)
 - pnpm 11+
 - A current browser with IndexedDB, Web Workers, WebAssembly, `MessageChannel`,
-  `File.text()`, `AbortController` and `Intl`; `CompressionStream` /
-  `DecompressionStream` are optional
+  `File.text()`, `Blob`/`Response` streams, `URL`, `TextEncoder`/`TextDecoder`,
+  `atob`/`btoa`, `AbortController` and `Intl`. Plain share links need no
+  compression APIs; gzip links need both `CompressionStream` and
+  `DecompressionStream` to create and `DecompressionStream` to open.
 - Outbound HTTPS from the Next.js server to `api.chess.com` for Chess.com import only
 
 ## Getting started
@@ -863,7 +909,7 @@ Development: `typescript`, `eslint`, `eslint-config-next`, `tailwindcss`,
 
 ## Testing and verification
 
-`pnpm typecheck`, `pnpm lint`, `pnpm test` (**35 files, 207 tests**) and
+`pnpm typecheck`, `pnpm lint`, `pnpm test` (**35 files, 215 tests**) and
 `pnpm build` all pass. Automated tests mock external HTTP and Worker I/O; they
 never depend on the live Chess.com API or a bundled engine binary. Coverage
 includes URL/username validation, archive ordering and exact-ID matching,
@@ -901,8 +947,10 @@ no raw engine coordinates or expected-points wording.
 Phase 6 tests additionally cover stable and content-sensitive review IDs, JSON
 round-trips of completed analysis, store save/update/touch/delete/list, corrupt
 and future-schema rejection, legacy migration, mismatched-analysis rejection,
-gzip/plain share encoding and decoding, malformed/unsupported/oversized and
+gzip/plain share encoding and decoding, missing/one-sided compression globals,
+clear compressed-link capability errors, malformed/unsupported/oversized and
 multi-game links, decompression caps, bundle format/version/PGN/analysis checks,
+import-collision comparison and timestamp provenance, replace/cancel UI flows,
 saved-review UI restore/share/import/delete/clear flows, single-run guard
 recovery after replay failure, overlapping-run rejection, and restored results
 that do not start an engine search.
@@ -958,8 +1006,10 @@ alone were not treated as completion evidence.
 - Share links hold one game only, contain no analysis snapshot, and are capped
   at 8,000 URL characters; larger games require a review-file export.
 - Share links are readable by anyone who has the URL and are not encrypted or
-  signed. Export files are plain JSON, so importing an unfamiliar file can
-  replace a saved review with the same deterministic ID.
+  signed. Export files are plain JSON and are not authenticated; importing one
+  with a matching deterministic ID can replace a saved review, but a newer,
+  more complete or differently configured local review now requires explicit
+  confirmation and cancellation preserves it.
 - Browser storage is subject to quota and eviction. Imported records are
   validated and size-capped, and compressed share links have a decode cap, but
   very large local libraries still depend on browser capacity.

@@ -19,10 +19,12 @@ import { AnalysisWorkspace } from "@/components/analysis-workspace";
 import { createAnalysisSettings } from "@/lib/analysis/settings";
 import {
   createBundleFromGame,
+  createReviewBundle,
   serializeReviewBundle,
 } from "@/lib/export/review-bundle";
 import { saveGameReview } from "@/lib/storage/review-store";
 import { MemoryReviewStore } from "@/lib/storage/review-store";
+import { createReviewRecord } from "@/lib/storage/schema";
 import { CHECKMATE_PGN, STANDARD_PGN } from "./fixtures";
 import { completeAnalysis, deterministicGame } from "./phase6-test-helpers";
 
@@ -150,7 +152,7 @@ describe("Phase 6 saved-review, share and export UI", () => {
     render(<AnalysisWorkspace store={store} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Review file" }));
-    const input = screen.getByLabelText("Choose a Movelens review file");
+    const input = screen.getByLabelText("Choose a MoveLens review file");
     fireEvent.change(input, {
       target: {
         files: [new File([text], "review.json", { type: "application/json" })],
@@ -165,7 +167,7 @@ describe("Phase 6 saved-review, share and export UI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Import another" }));
     fireEvent.click(screen.getByRole("tab", { name: "Review file" }));
-    fireEvent.change(screen.getByLabelText("Choose a Movelens review file"), {
+    fireEvent.change(screen.getByLabelText("Choose a MoveLens review file"), {
       target: {
         files: [new File(["{bad"], "bad.json", { type: "application/json" })],
       },
@@ -204,5 +206,121 @@ describe("Phase 6 saved-review, share and export UI", () => {
     await screen.findByText("No saved reviews yet");
     expect(await store.list()).toHaveLength(0);
     expect(confirm).toHaveBeenCalled();
+  });
+
+  it("keeps the existing review when a conflicting bundle import is cancelled", async () => {
+    const store = new MemoryReviewStore();
+    const game = deterministicGame();
+    const analysis = await completeAnalysis(game, settings);
+    const existing = await saveGameReview(store, { game, settings, analysis });
+    const imported = createReviewBundle(
+      createReviewRecord({
+        game,
+        settings: createAnalysisSettings("quick"),
+        createdAt: existing.createdAt - 10_000,
+        updatedAt: existing.updatedAt - 5_000,
+        lastAccessedAt: existing.lastAccessedAt - 5_000,
+      }),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<AnalysisWorkspace store={store} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Review file" }));
+    fireEvent.change(screen.getByLabelText("Choose a MoveLens review file"), {
+      target: {
+        files: [
+          new File([serializeReviewBundle(imported)], "older.json", {
+            type: "application/json",
+          }),
+        ],
+      },
+    });
+
+    await screen.findByText("Import cancelled. The existing saved review was kept.");
+    const kept = await store.get(existing.id);
+    expect(kept.analysisState).toBe("complete");
+    expect(kept.settings).toEqual(settings);
+    expect(kept.updatedAt).toBe(existing.updatedAt);
+    expect(kept.analysis?.identity.key).toBe(analysis.identity.key);
+    expect(confirm).toHaveBeenCalled();
+    expect(confirm.mock.calls[0]![0]).toContain("Choose Cancel to keep the existing review.");
+    expect(screen.queryByRole("heading", { name: "Alice vs Bob" })).toBeNull();
+  });
+
+  it("replaces a conflicting bundle after confirmation and preserves its timestamps", async () => {
+    const store = new MemoryReviewStore();
+    const game = deterministicGame();
+    await saveGameReview(store, { game, settings });
+    const importedSettings = createAnalysisSettings("quick");
+    const importedAnalysis = await completeAnalysis(game, importedSettings);
+    const imported = createReviewBundle(
+      createReviewRecord({
+        game,
+        settings: importedSettings,
+        analysis: importedAnalysis,
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_100_000,
+        lastAccessedAt: 1_700_000_200_000,
+      }),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<AnalysisWorkspace store={store} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Review file" }));
+    fireEvent.change(screen.getByLabelText("Choose a MoveLens review file"), {
+      target: {
+        files: [
+          new File([serializeReviewBundle(imported)], "review.json", {
+            type: "application/json",
+          }),
+        ],
+      },
+    });
+
+    await screen.findByRole("heading", { name: "Alice vs Bob" });
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(
+        "Review imported with its completed analysis.",
+      ),
+    );
+    const replaced = await store.get(game.id);
+    expect(replaced.settings).toEqual(importedSettings);
+    expect(replaced.createdAt).toBe(imported.review.createdAt);
+    expect(replaced.updatedAt).toBe(imported.review.updatedAt);
+    expect(replaced.lastAccessedAt).toBe(imported.review.lastAccessedAt);
+    expect(replaced.analysis?.identity.key).toBe(importedAnalysis.identity.key);
+    expect(confirm).toHaveBeenCalled();
+  });
+
+  it("does not prompt for a newer bundle with matching settings and completeness", async () => {
+    const store = new MemoryReviewStore();
+    const game = deterministicGame();
+    await saveGameReview(store, { game, settings });
+    const imported = createReviewBundle(
+      createReviewRecord({
+        game,
+        settings,
+        createdAt: 1_700_000_000_000,
+        updatedAt: Date.now() + 60_000,
+        lastAccessedAt: Date.now() + 60_000,
+      }),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<AnalysisWorkspace store={store} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Review file" }));
+    fireEvent.change(screen.getByLabelText("Choose a MoveLens review file"), {
+      target: {
+        files: [
+          new File([serializeReviewBundle(imported)], "newer.json", {
+            type: "application/json",
+          }),
+        ],
+      },
+    });
+
+    await screen.findByRole("heading", { name: "Alice vs Bob" });
+    expect(confirm).not.toHaveBeenCalled();
+    expect((await store.get(game.id)).updatedAt).toBe(imported.review.updatedAt);
   });
 });

@@ -92,7 +92,7 @@ export function parseReviewBundleText(text: string): ReviewBundleResult {
     return {
       status: "error",
       code: "corrupt",
-      message: "This file is not valid JSON. Choose a Movelens review export.",
+      message: "This file is not valid JSON. Choose a MoveLens review export.",
     };
   }
   if (
@@ -104,7 +104,7 @@ export function parseReviewBundleText(text: string): ReviewBundleResult {
     return {
       status: "error",
       code: "corrupt",
-      message: "This is not a Movelens review file.",
+      message: "This is not a MoveLens review file.",
     };
   }
   const version = (value as Record<string, unknown>).version;

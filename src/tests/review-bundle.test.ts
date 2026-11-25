@@ -60,7 +60,7 @@ describe("Phase 6 portable review bundles", () => {
     const share = parseReviewBundleText(JSON.stringify({ format: "other", version: 1 }));
     expectError(share, "corrupt");
     if (share.status === "error") {
-      expect(share.message).toContain("not a Movelens review file");
+      expect(share.message).toContain("not a MoveLens review file");
     }
   });
 

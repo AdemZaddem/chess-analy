@@ -390,7 +390,7 @@ export function ImportPanel({
               type="file"
               accept=".json,application/json"
               className="sr-only"
-              aria-label="Choose a Movelens review file"
+              aria-label="Choose a MoveLens review file"
               onChange={(event) => {
                 void handleBundleFile(event.target.files?.[0]);
                 event.target.value = "";
@@ -408,7 +408,9 @@ export function ImportPanel({
               </span>
               <span className="text-xs leading-relaxed text-muted">
                 Restores the game, settings and any analysis stored in the file.
-                The file is read locally and validated before it is used.
+                The file is read locally and validated before it is used. If this
+                game is already saved, you will be asked before replacing a newer
+                or more complete review.
               </span>
             </button>
             <p className="text-[11px] text-muted">

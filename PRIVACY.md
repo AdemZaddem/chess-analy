@@ -30,7 +30,9 @@ a Chess.com login, password, cookie or session token.
 - **Share links:** the PGN and minimal settings are encoded in the URL
   fragment. Fragments are not included in normal HTTP requests to the site.
   The recipient's browser decodes the link and analyzes locally; MoveLens does
-  not store the link or its PGN on a server.
+  not store the link or its PGN on a server. Compressed (`gzip`) links require
+  `DecompressionStream`; an unsupported browser receives a clear error and can
+  request a plain link or exported review file instead.
 - **Export files:** generated locally. The application does not retain a copy.
 
 ## Sharing caveat
@@ -44,7 +46,10 @@ to disclose the moves.
 Review export files are plain JSON and are not encrypted or signed. Compare the
 file with your own records before trusting an imported analysis; MoveLens
 validates structure, versions, PGN and analysis identity, but cannot prove who
-authored the file.
+authored the file. If a file has the same deterministic ID as a saved review,
+MoveLens compares timestamps, analysis completeness and settings before writing.
+You are asked to confirm a potentially destructive replacement; cancelling
+leaves the existing local review unchanged.
 
 ## Local storage and deletion
 

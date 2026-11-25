@@ -22,12 +22,15 @@ import {
 } from "@/lib/share/review-share";
 import {
   createReviewId,
+  createReviewRecord,
   loadReview,
   withReviewId,
   type ReviewAnalysisState,
+  type StoredReviewRecord,
 } from "@/lib/storage/schema";
 import {
   describeStorageError,
+  getExistingReviewConflict,
   getReviewStore,
   listReviewSummaries,
   saveGameReview,
@@ -88,20 +91,64 @@ export function AnalysisWorkspace({
   }, [store]);
 
   const activate = useCallback(
-    async (next: ActiveReview, successMessage: string) => {
+    async (
+      next: ActiveReview,
+      successMessage: string,
+      importedRecord?: StoredReviewRecord,
+    ) => {
       // Imported games start with a random parser ID; normalize it before both
       // persistence and analysis so restored snapshots keep a matching identity.
       const reviewGame = withReviewId(next.game);
+      const timestamps = importedRecord
+        ? {
+            createdAt: importedRecord.createdAt,
+            updatedAt: importedRecord.updatedAt,
+            lastAccessedAt: importedRecord.lastAccessedAt,
+          }
+        : undefined;
+      const candidate = createReviewRecord({
+        game: reviewGame,
+        settings: next.settings,
+        analysis: next.analysis,
+        analysisState: next.analysisState,
+        lastProgress: importedRecord?.lastProgress,
+        ...(timestamps ?? {}),
+      });
+
       let saveError: string | null = null;
+      let cancelled = false;
       try {
-        await saveGameReview(store, {
-          game: reviewGame,
-          settings: next.settings,
-          analysis: next.analysis,
-          analysisState: next.analysisState,
-        });
+        const conflict = await getExistingReviewConflict(store, candidate);
+        if (
+          conflict &&
+          !(
+            typeof window !== "undefined" &&
+            typeof window.confirm === "function" &&
+            window.confirm(conflict.message)
+          )
+        ) {
+          cancelled = true;
+        }
+        if (!cancelled) {
+          await saveGameReview(store, {
+            game: reviewGame,
+            settings: next.settings,
+            analysis: next.analysis,
+            analysisState: next.analysisState,
+            lastProgress: importedRecord?.lastProgress,
+            ...(timestamps ? { timestamps } : {}),
+          });
+        }
       } catch (error) {
         saveError = messageOf(error, "Could not save this game locally.");
+      }
+
+      if (cancelled) {
+        setFeedback({
+          tone: "info",
+          message: "Import cancelled. The existing saved review was kept.",
+        });
+        return;
       }
       setActive({ ...next, game: reviewGame });
       setView("game");
@@ -195,6 +242,7 @@ export function AnalysisWorkspace({
           : bundle.record.analysis
             ? "Review imported with its completed analysis."
             : "Game imported from review file and saved locally.",
+        bundle.record,
       );
     },
     [activate],

@@ -99,8 +99,16 @@ function base64UrlToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+/** Compressed links are only created when they can also be decoded locally. */
+export function hasCompressedShareSupport(): boolean {
+  return (
+    typeof CompressionStream !== "undefined" &&
+    typeof DecompressionStream !== "undefined"
+  );
+}
+
 async function compress(bytes: Uint8Array): Promise<Uint8Array | null> {
-  if (typeof CompressionStream === "undefined") return null;
+  if (!hasCompressedShareSupport()) return null;
   try {
     const stream = new Blob([bytes as BlobPart])
       .stream()
@@ -115,7 +123,7 @@ async function decompress(bytes: Uint8Array): Promise<Uint8Array> {
   if (typeof DecompressionStream === "undefined") {
     throw new ReviewShareError(
       "unsupported-version",
-      "This browser cannot open compressed share links.",
+      "This browser cannot open compressed share links. Ask for a plain link or an exported review file instead.",
     );
   }
   try {

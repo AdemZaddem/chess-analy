@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAnalysisSettings } from "@/lib/analysis/settings";
 import {
   buildReviewShareUrl,
@@ -18,6 +18,10 @@ import { deterministicGame } from "./phase6-test-helpers";
 const settings = createAnalysisSettings("standard");
 const game = deterministicGame();
 const payload = createReviewSharePayload(game, settings);
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 async function expectShareError(
   run: () => Promise<unknown>,
@@ -60,12 +64,65 @@ describe("Phase 6 privacy-friendly share links", () => {
     expect(share.urlLength).toBeLessThan(MAX_SHARE_URL_LENGTH);
   });
 
-  it("uses gzip when the browser exposes CompressionStream", async () => {
-    if (typeof CompressionStream === "undefined") return;
+  it("uses gzip when the browser can both compress and decompress", async () => {
+    if (
+      typeof CompressionStream === "undefined" ||
+      typeof DecompressionStream === "undefined"
+    ) {
+      return;
+    }
     const encoded = await encodeReviewShareHash(payload);
     expect(encoded.encoding).toBe("gzip");
     const decoded = await decodeReviewShareHash(encoded.hash);
     expect(decoded.pgn).toBe(game.pgn);
+  });
+
+  it("creates and opens plain links when compression globals are absent", async () => {
+    vi.stubGlobal("CompressionStream", undefined);
+    vi.stubGlobal("DecompressionStream", undefined);
+
+    const encoded = await encodeReviewShareHash(payload);
+    expect(encoded.encoding).toBe("plain");
+    expect(encoded.hash).toMatch(/^review=v1\.p\./);
+    const decoded = await decodeReviewShareHash(encoded.hash);
+    expect(decoded.pgn).toBe(game.pgn);
+  });
+
+  it("does not generate gzip links when only CompressionStream exists", async () => {
+    if (
+      typeof CompressionStream === "undefined" ||
+      typeof DecompressionStream === "undefined"
+    ) {
+      return;
+    }
+    vi.stubGlobal("DecompressionStream", undefined);
+
+    const encoded = await encodeReviewShareHash(payload);
+    expect(encoded.encoding).toBe("plain");
+    expect(encoded.hash).toMatch(/^review=v1\.p\./);
+    const decoded = await decodeReviewShareHash(encoded.hash);
+    expect(decoded.pgn).toBe(game.pgn);
+  });
+
+  it("reports a clear error when a compressed link is opened without DecompressionStream", async () => {
+    if (
+      typeof CompressionStream === "undefined" ||
+      typeof DecompressionStream === "undefined"
+    ) {
+      return;
+    }
+    const encoded = await encodeReviewShareHash(payload);
+    expect(encoded.encoding).toBe("gzip");
+    vi.stubGlobal("DecompressionStream", undefined);
+
+    const error = await decodeReviewShareHash(encoded.hash).catch(
+      (cause: unknown) => cause,
+    );
+    expect(error).toBeInstanceOf(ReviewShareError);
+    expect((error as ReviewShareError).code).toBe("unsupported-version");
+    expect((error as Error).message).toContain(
+      "Ask for a plain link or an exported review file instead.",
+    );
   });
 
   it("reconstructs a local game without any analysis snapshot", async () => {
@@ -141,7 +198,12 @@ describe("Phase 6 privacy-friendly share links", () => {
   });
 
   it("caps decompressed share payloads", async () => {
-    if (typeof CompressionStream === "undefined") return;
+    if (
+      typeof CompressionStream === "undefined" ||
+      typeof DecompressionStream === "undefined"
+    ) {
+      return;
+    }
     const hugeJson = new TextEncoder().encode(
       JSON.stringify({
         ...payload,

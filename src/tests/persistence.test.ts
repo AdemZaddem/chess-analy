@@ -12,6 +12,7 @@ import {
   withReviewId,
 } from "@/lib/storage/schema";
 import {
+  getReviewImportConflict,
   listReviewSummaries,
   MemoryReviewStore,
   saveGameReview,
@@ -194,5 +195,89 @@ describe("Phase 6 local persistence", () => {
     expect(migrated.analysis).toBeNull();
     expect(migrated.analysisState).toBe("incomplete");
     expect(migrated.game.pgn).toBe(STANDARD_PGN);
+  });
+
+  it("flags imports that would replace newer, more complete or differently configured reviews", async () => {
+    const game = deterministicGame();
+    const analysis = await completeAnalysis(game, settings);
+    const complete = createReviewRecord({
+      game,
+      settings,
+      analysis,
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_100_000,
+      lastAccessedAt: 1_700_000_200_000,
+    });
+    const olderGameOnly = createReviewRecord({
+      game,
+      settings,
+      createdAt: 1_699_999_900_000,
+      updatedAt: 1_699_999_950_000,
+      lastAccessedAt: 1_699_999_960_000,
+    });
+
+    const conflict = getReviewImportConflict(complete, olderGameOnly);
+    expect(conflict?.reasons).toContain("newer-existing");
+    expect(conflict?.reasons).toContain("more-complete-existing");
+    expect(conflict?.message).toContain("a completed analysis");
+    expect(conflict?.message).toContain("Choose Cancel to keep the existing review.");
+
+    const differentSettings = createReviewRecord({
+      game,
+      settings: createAnalysisSettings("standard"),
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_200_000,
+      lastAccessedAt: 1_700_000_200_000,
+    });
+    const settingsConflict = getReviewImportConflict(
+      createReviewRecord({
+        game,
+        settings,
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_100_000,
+        lastAccessedAt: 1_700_000_100_000,
+      }),
+      differentSettings,
+    );
+    expect(settingsConflict?.reasons).toEqual(["different-settings"]);
+
+    const newerSameSettings = createReviewRecord({
+      game,
+      settings,
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_300_000,
+      lastAccessedAt: 1_700_000_300_000,
+    });
+    expect(
+      getReviewImportConflict(
+        createReviewRecord({
+          game,
+          settings,
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_100_000,
+          lastAccessedAt: 1_700_000_100_000,
+        }),
+        newerSameSettings,
+      ),
+    ).toBeNull();
+  });
+
+  it("preserves imported provenance when a review is explicitly saved", async () => {
+    const store = new MemoryReviewStore();
+    const game = deterministicGame();
+    const saved = await saveGameReview(store, {
+      game,
+      settings,
+      timestamps: {
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_100_000,
+        lastAccessedAt: 1_700_000_200_000,
+      },
+    });
+
+    expect(saved.createdAt).toBe(1_700_000_000_000);
+    expect(saved.updatedAt).toBe(1_700_000_100_000);
+    expect(saved.lastAccessedAt).toBe(1_700_000_200_000);
+    expect(await store.get(saved.id)).toEqual(saved);
   });
 });
