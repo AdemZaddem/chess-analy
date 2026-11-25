@@ -36,10 +36,24 @@ export interface GameMetadata {
   opening?: string;
 }
 
-export interface GameSource {
-  kind: "file" | "text";
+export interface FileGameSource {
+  kind: "file";
   filename?: string;
 }
+
+export interface TextGameSource {
+  kind: "text";
+}
+
+export interface ChesscomGameSource {
+  kind: "chesscom";
+  gameUrl: string;
+  username: string;
+  gameId: string;
+  gameType: "live" | "daily";
+}
+
+export type GameSource = FileGameSource | TextGameSource | ChesscomGameSource;
 
 export interface NormalizedGame {
   id: string;

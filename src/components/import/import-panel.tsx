@@ -2,8 +2,10 @@
 
 import { useRef, useState } from "react";
 import {
+  ArrowLeft,
   ClipboardPaste,
   FileText,
+  Globe2,
   LoaderCircle,
   Upload,
 } from "lucide-react";
@@ -13,7 +15,11 @@ import { ErrorAlert } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { NormalizedGame } from "@/lib/chess/types";
+import { ChesscomImportError } from "@/lib/chesscom/errors";
+import { parseChesscomGameUrl } from "@/lib/chesscom/game-url";
+import { normalizeChesscomUsername } from "@/lib/chesscom/username";
 import { readPgnFile } from "@/lib/import/file-reading";
+import { importChesscomGame } from "@/lib/import/chesscom-import-client";
 import {
   importPgn,
   type PgnImportMultiple,
@@ -21,22 +27,31 @@ import {
 } from "@/lib/import/pgn-import-service";
 import { MultiGamePicker } from "./multi-game-picker";
 
-type ImportTab = "file" | "text";
+type ImportTab = "file" | "text" | "chesscom";
 
 const tabs: { id: ImportTab; label: string; icon: typeof Upload }[] = [
   { id: "file", label: "Upload file", icon: Upload },
   { id: "text", label: "Paste PGN", icon: ClipboardPaste },
+  { id: "chesscom", label: "Chess.com", icon: Globe2 },
 ];
+
+const fieldClass =
+  "w-full rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent/30";
 
 export function ImportPanel({
   onImport,
+  onCancel,
 }: {
   onImport: (game: NormalizedGame) => void;
+  onCancel?: () => void;
 }) {
   const [tab, setTab] = useState<ImportTab>("file");
   const [text, setText] = useState("");
   const [filename, setFilename] = useState<string | undefined>();
+  const [gameUrl, setGameUrl] = useState("");
+  const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
+  const [chesscomBusy, setChesscomBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [multiple, setMultiple] = useState<PgnImportMultiple | null>(null);
@@ -64,6 +79,39 @@ export function ImportPanel({
       return;
     }
     setError(result.message);
+  }
+
+  async function handleChesscomImport() {
+    clearFeedback();
+    try {
+      // Validate before the request so users get immediate, specific feedback.
+      parseChesscomGameUrl(gameUrl);
+      normalizeChesscomUsername(username);
+    } catch (cause) {
+      setError(
+        cause instanceof ChesscomImportError
+          ? cause.message
+          : "Check the game URL and username.",
+      );
+      return;
+    }
+
+    setChesscomBusy(true);
+    try {
+      const result = await importChesscomGame({
+        gameUrl: gameUrl.trim(),
+        username: username.trim(),
+      });
+      runImport(result.pgn, result.source);
+    } catch (cause) {
+      setError(
+        cause instanceof ChesscomImportError
+          ? cause.message
+          : "Chess.com import failed. Please try again.",
+      );
+    } finally {
+      setChesscomBusy(false);
+    }
   }
 
   async function handleFile(file: File | undefined) {
@@ -104,11 +152,18 @@ export function ImportPanel({
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle>Import a game</CardTitle>
-          <span className="text-xs text-muted">Standard chess PGN only</span>
+          {onCancel ? (
+            <Button variant="ghost" size="sm" onClick={onCancel}>
+              <ArrowLeft className="size-4" aria-hidden />
+              Back to game
+            </Button>
+          ) : (
+            <span className="text-xs text-muted">Standard chess PGN only</span>
+          )}
         </div>
         <p className="mt-1 text-sm text-muted">
-          Upload a .pgn file or paste your game notation. Your game is parsed
-          locally in the browser.
+          Import a public Chess.com game, upload a .pgn file, or paste your game
+          notation. PGN parsing and replay happen locally.
         </p>
       </CardHeader>
 
@@ -116,7 +171,7 @@ export function ImportPanel({
         <div
           className="flex gap-1 rounded-xl border border-line bg-canvas/60 p-1"
           role="tablist"
-          aria-label="PGN import method"
+          aria-label="Game import method"
         >
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
@@ -193,7 +248,7 @@ export function ImportPanel({
               </p>
             ) : null}
           </div>
-        ) : (
+        ) : tab === "text" ? (
           <div className="space-y-3" role="tabpanel">
             <label htmlFor="pgn-text" className="sr-only">
               PGN notation
@@ -224,6 +279,77 @@ export function ImportPanel({
               </Button>
             </div>
           </div>
+        ) : (
+          <form
+            className="space-y-4"
+            role="tabpanel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleChesscomImport();
+            }}
+          >
+            <div className="space-y-1.5">
+              <label htmlFor="chesscom-url" className="text-sm font-medium text-ink">
+                Chess.com game URL
+              </label>
+              <input
+                id="chesscom-url"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={gameUrl}
+                placeholder="https://www.chess.com/game/live/123456789"
+                className={fieldClass}
+                onChange={(event) => {
+                  setGameUrl(event.target.value);
+                  clearFeedback();
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="chesscom-username" className="text-sm font-medium text-ink">
+                Chess.com username
+              </label>
+              <input
+                id="chesscom-username"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={username}
+                placeholder="Either player's username"
+                className={fieldClass}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  clearFeedback();
+                }}
+              />
+            </div>
+            <p className="text-xs leading-relaxed text-muted">
+              Public live and daily games are supported. Month-by-month public
+              archives are searched newest to oldest, so older games may take a
+              moment. Private and unavailable games cannot be imported.
+            </p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted">
+                No Chess.com login is required or requested.
+              </p>
+              <Button
+                type="submit"
+                disabled={chesscomBusy || !gameUrl.trim() || !username.trim()}
+              >
+                {chesscomBusy ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                    Searching archives…
+                  </>
+                ) : (
+                  "Import game"
+                )}
+              </Button>
+            </div>
+          </form>
         )}
 
         {error ? <ErrorAlert>{error}</ErrorAlert> : null}

@@ -8,6 +8,7 @@ import {
   Check,
   Copy,
   Sparkles,
+  Upload,
 } from "lucide-react";
 import type { ChessboardOptions } from "react-chessboard";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import { useGameViewer } from "@/hooks/use-game-viewer";
 import type { PositionStatus } from "@/lib/chess/game-navigation";
 import type {
   GameMetadata,
+  GameSource,
   NormalizedGame,
   PlayerInfo,
 } from "@/lib/chess/types";
@@ -80,12 +82,22 @@ function getActivePlayer(metadata: GameMetadata, turn: "w" | "b"): PlayerInfo {
   return turn === "w" ? metadata.white : metadata.black;
 }
 
+function sourceLabel(source: GameSource): string {
+  if (source.kind === "chesscom") {
+    return `Imported from Chess.com · ${source.gameType} #${source.gameId}`;
+  }
+  if (source.kind === "file") return source.filename ?? "PGN file";
+  return "Pasted PGN";
+}
+
 export function GameViewer({
   game,
   onReset,
+  onImportAnother,
 }: {
   game: NormalizedGame;
   onReset: () => void;
+  onImportAnother?: () => void;
 }) {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [copiedFen, setCopiedFen] = useState<string | null>(null);
@@ -180,6 +192,12 @@ export function GameViewer({
             <ArrowLeft className="size-4" aria-hidden />
             New analysis
           </Button>
+          {onImportAnother ? (
+            <Button variant="ghost" size="sm" onClick={onImportAnother}>
+              <Upload className="size-4" aria-hidden />
+              Import another
+            </Button>
+          ) : null}
           <div>
             <h2 className="text-sm font-semibold text-ink">
               {game.metadata.white.name} vs {game.metadata.black.name}
@@ -187,7 +205,7 @@ export function GameViewer({
             <p className="text-xs text-muted">
               {game.gameCount > 1
                 ? `Game ${game.gameIndex} of ${game.gameCount}`
-                : game.source.filename ?? "Pasted PGN"}
+                : sourceLabel(game.source)}
             </p>
           </div>
         </div>
@@ -204,6 +222,17 @@ export function GameViewer({
           {statusLabels[viewer.status]}
         </Badge>
       </div>
+
+      {game.source.kind === "chesscom" ? (
+        <p
+          role="status"
+          className="rounded-xl border border-accent/25 bg-accent/10 px-4 py-2.5 text-sm text-ink"
+        >
+          Successfully imported Chess.com {game.source.gameType} game{" "}
+          <span className="font-mono">{game.source.gameId}</span> using username{" "}
+          <span className="font-medium">{game.source.username}</span>.
+        </p>
+      ) : null}
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="p-3 sm:p-4">

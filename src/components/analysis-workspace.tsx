@@ -7,10 +7,28 @@ import type { NormalizedGame } from "@/lib/chess/types";
 
 export function AnalysisWorkspace() {
   const [game, setGame] = useState<NormalizedGame | null>(null);
+  const [showImport, setShowImport] = useState(true);
 
-  if (game) {
-    return <GameViewer game={game} onReset={() => setGame(null)} />;
+  if (!showImport && game) {
+    return (
+      <GameViewer
+        game={game}
+        onImportAnother={() => setShowImport(true)}
+        onReset={() => {
+          setGame(null);
+          setShowImport(true);
+        }}
+      />
+    );
   }
 
-  return <ImportPanel onImport={setGame} />;
+  return (
+    <ImportPanel
+      onImport={(nextGame) => {
+        setGame(nextGame);
+        setShowImport(false);
+      }}
+      onCancel={game ? () => setShowImport(false) : undefined}
+    />
+  );
 }

@@ -1,12 +1,13 @@
 import { parsePgn, PgnParseError } from "../chess/pgn-parser";
 import type { PgnParseErrorKind } from "../chess/pgn-parser";
 import { splitPgnGames } from "../chess/pgn-split";
-import type { GamePreview, NormalizedGame } from "../chess/types";
+import type {
+  GamePreview,
+  GameSource,
+  NormalizedGame,
+} from "../chess/types";
 
-export interface PgnImportSource {
-  kind: "file" | "text";
-  filename?: string;
-}
+export type PgnImportSource = GameSource;
 
 export interface PgnImportSuccess {
   status: "success";
