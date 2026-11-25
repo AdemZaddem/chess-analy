@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   ArrowLeft,
   ClipboardPaste,
+  FileJson,
   FileText,
   Globe2,
   LoaderCircle,
@@ -15,6 +16,8 @@ import { ErrorAlert } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { NormalizedGame } from "@/lib/chess/types";
+import type { ReviewBundleResult } from "@/lib/export/review-bundle";
+import { parseReviewBundleText } from "@/lib/export/review-bundle";
 import { ChesscomImportError } from "@/lib/chesscom/errors";
 import { parseChesscomGameUrl } from "@/lib/chesscom/game-url";
 import { normalizeChesscomUsername } from "@/lib/chesscom/username";
@@ -27,12 +30,14 @@ import {
 } from "@/lib/import/pgn-import-service";
 import { MultiGamePicker } from "./multi-game-picker";
 
-type ImportTab = "file" | "text" | "chesscom";
+type ImportTab = "file" | "text" | "chesscom" | "review";
+type ImportedBundle = Extract<ReviewBundleResult, { status: "success" }>;
 
 const tabs: { id: ImportTab; label: string; icon: typeof Upload }[] = [
   { id: "file", label: "Upload file", icon: Upload },
   { id: "text", label: "Paste PGN", icon: ClipboardPaste },
   { id: "chesscom", label: "Chess.com", icon: Globe2 },
+  { id: "review", label: "Review file", icon: FileJson },
 ];
 
 const fieldClass =
@@ -41,9 +46,11 @@ const fieldClass =
 export function ImportPanel({
   onImport,
   onCancel,
+  onImportBundle,
 }: {
   onImport: (game: NormalizedGame) => void;
   onCancel?: () => void;
+  onImportBundle?: (bundle: ImportedBundle) => void;
 }) {
   const [tab, setTab] = useState<ImportTab>("file");
   const [text, setText] = useState("");
@@ -51,11 +58,35 @@ export function ImportPanel({
   const [gameUrl, setGameUrl] = useState("");
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
+  const [bundleBusy, setBundleBusy] = useState(false);
   const [chesscomBusy, setChesscomBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [multiple, setMultiple] = useState<PgnImportMultiple | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bundleInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleBundleFile(file: File | undefined) {
+    if (!file) return;
+    clearFeedback();
+    setBundleBusy(true);
+    try {
+      const result = parseReviewBundleText(await file.text());
+      if (result.status === "error") {
+        setError(result.message);
+        return;
+      }
+      if (!onImportBundle) {
+        setError("Review file import is unavailable on this page.");
+        return;
+      }
+      onImportBundle(result);
+    } catch {
+      setError("Could not read that review file.");
+    } finally {
+      setBundleBusy(false);
+    }
+  }
 
   function clearFeedback() {
     setError(null);
@@ -173,7 +204,9 @@ export function ImportPanel({
           role="tablist"
           aria-label="Game import method"
         >
-          {tabs.map(({ id, label, icon: Icon }) => (
+          {tabs
+            .filter(({ id }) => id !== "review" || onImportBundle)
+            .map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
@@ -279,7 +312,7 @@ export function ImportPanel({
               </Button>
             </div>
           </div>
-        ) : (
+        ) : tab === "chesscom" ? (
           <form
             className="space-y-4"
             role="tabpanel"
@@ -350,6 +383,39 @@ export function ImportPanel({
               </Button>
             </div>
           </form>
+        ) : (
+          <div className="space-y-3" role="tabpanel">
+            <input
+              ref={bundleInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="sr-only"
+              aria-label="Choose a Movelens review file"
+              onChange={(event) => {
+                void handleBundleFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => bundleInputRef.current?.click()}
+              disabled={bundleBusy}
+              className="flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line px-6 py-7 text-center transition-colors hover:border-accent/50 hover:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-60"
+            >
+              <FileJson className="size-6 text-accent" aria-hidden />
+              <span className="text-sm font-medium text-ink">
+                {bundleBusy ? "Validating review…" : "Choose a .json review export"}
+              </span>
+              <span className="text-xs leading-relaxed text-muted">
+                Restores the game, settings and any analysis stored in the file.
+                The file is read locally and validated before it is used.
+              </span>
+            </button>
+            <p className="text-[11px] text-muted">
+              This is different from a share link: links open a game locally,
+              while review files may contain a completed analysis.
+            </p>
+          </div>
         )}
 
         {error ? <ErrorAlert>{error}</ErrorAlert> : null}

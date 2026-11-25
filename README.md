@@ -4,7 +4,9 @@ A free, local-first chess game analysis website. The project includes
 **Phase 1: Foundation and PGN viewer**, **Phase 2: Public Chess.com game
 import**, **Phase 3: Local Stockfish single-position analysis**,
 **Phase 4: Full-game review with deterministic move classification and
-accuracy**, and **Phase 5: Interactive game review and visual analysis**.
+accuracy**, **Phase 5: Interactive game review and visual analysis**, and
+**Phase 6: Local persistence, saved reviews, privacy-friendly sharing and
+portable export/import**.
 
 Users can import a public Chess.com game by URL and username, upload a `.pgn`
 file, or paste PGN notation. Games are normalized once, replayed on an
@@ -13,6 +15,9 @@ Chess rules and FEN state come from `chess.js`. The current position can be
 analyzed with a self-hosted Stockfish 19 Lite WASM engine running entirely in a
 Web Worker. An explicit full-game review analyzes every position sequentially,
 classifies every played move, and reports independent White and Black accuracy.
+Imported games are saved in browser IndexedDB; completed reviews can be reopened
+without another engine run, shared as a PGN-only URL fragment, or exported as a
+versioned JSON file.
 
 ## Scope
 
@@ -39,12 +44,19 @@ Implemented:
 - Played/best-move arrows, square highlights and a validated PV variation viewer
 - Review summary with accuracy, classification counts and data-driven key moments
 - Board-adjacent significant-move header and plain-language arrow legend
+- Versioned IndexedDB records with automatic save, status labels and restore
+- Saved-review list with open, delete and confirmed clear-all controls
+- Completed analysis snapshots restored without rerunning Stockfish
+- PGN-and-settings share links encoded in the URL fragment, with gzip when available
+- Versioned JSON review bundles with optional completed analysis and validated imports
+- Browser-only storage and sharing; no accounts, backend database, cloud sync or telemetry
 
-Not implemented yet (planned for later phases):
+Explicitly out of scope:
 
 - Move-by-move opening explorer or online opening database
-- IndexedDB persistence and history dashboard
-- Authentication, accounts, sharing/social, cloud engine or paid APIs
+- Authentication, accounts, server-side storage, cloud sync, subscriptions or paid APIs
+- Account-based/social sharing, friends, leaderboards, chat or online multiplayer
+- New classification logic, AI tactical explanations or a different Stockfish engine
 
 ## Chess.com import
 
@@ -560,18 +572,141 @@ desktop / mobile Playwright runs. No console or page errors were recorded.
 | 1440 × 900 | `scrollWidth = clientWidth = 1440` | none | 600 × 600 board with 20 × 600 bar beside it | 802 × 224 | sidebar at x=985, width 326 |
 | 390 × 844 | `scrollWidth = clientWidth = 390` | none | 316 × 316 board with 16 × 316 bar | 332 × 176 | stacked at x=29, width 332 |
 
-Screenshots were captured at
-`/private/var/folders/vv/7f2xgzyx6gj9w_yll6px092c0000gn/T/opencode/phase5-{desktop,mobile}-{variation,final}.png`
-with verified dimensions 1440 × 900 and 390 × 844. Vision OCR of the captured
-pixels confirmed visible `Review summary`, `WHITE ACCURACY 99.9%`,
-`BLACK ACCURACY 99.7%`, `20 moves`, `21 positions`, `depth 12`, `Ruy Lopez C60`,
-`Evaluation`, `Engine variation`, `Key moments`, `Step into line` and
-`Return to game` labels on the expected layouts.
+## Local persistence, sharing and portability (Phase 6)
+
+Phase 6 adds local durability around the existing Phases 1–5 behavior. It does
+not change classification, accuracy, the engine build or the authoritative ply
+state. All saved data stays in the browser; sharing and export are explicit user
+actions.
+
+### Persistence architecture
+
+`src/lib/storage/` uses native IndexedDB — database `movelens`, version `1`,
+object store `reviews` — with no `idb` or Dexie dependency. A record contains:
+
+- `schemaVersion: 1`, deterministic `id`, and creation/update/last-access times.
+- A compact `GameSnapshot`: normalized PGN, import source, game count and game index.
+- Analysis settings (preset, depth, expected-points and classification thresholds).
+- A complete `FullGameAnalysis` snapshot or `null`, plus `analysisState` and
+  optional last-progress counts.
+
+Moves, metadata and FENs are rebuilt with the existing `parsePgn` / `importPgn`
+pipeline on read instead of being duplicated in storage. Chess.com games use a
+stable `chesscom:<type>:<gameId>` ID; pasted/file games use a conservative hash
+of initial FEN, normalized PGN and game index. Unversioned legacy records are
+migrated to v1; newer schema versions are rejected with an explicit error. One
+damaged record is skipped during listing rather than hiding the rest of the
+library.
+
+Every imported game is normalized with `withReviewId()` **before** analysis so
+the engine's identity key matches the persisted ID. On restore, a snapshot is
+accepted only when
+`analysis.identity.key === createAnalysisIdentity(game, settings).key`;
+mismatched or structurally damaged snapshots are dropped and shown as
+incomplete, never as a completed review.
+
+### Saved games and reviews
+
+The **My reviews** entry appears in the import view when at least one saved game
+exists and beside the board while a game is open. Opening it lists players,
+result, date, ply count, last-opened date and one of four states: *Not analyzed*,
+*Interrupted*, *Incomplete* or *Reviewed*. *Open* restores the game and any
+valid completed analysis; *Delete* asks for confirmation, and *Clear all saved
+games* uses an in-panel confirmation step. Import, share-link load and export
+import all auto-save. Analysis start, completion, cancellation and failure events
+update the corresponding record.
+
+### Share links
+
+**Copy share link** and native **Share** generate
+`#review=v1.<g|p>.<base64url>`:
+
+- `g` is gzip via `CompressionStream`; `p` is plain base64url fallback.
+- The payload contains `v`, PGN, preset, depth, minimal player/date/result
+  metadata and, for Chess.com games, only game type and ID. It contains **no
+  analysis snapshot**, username, game URL, account data or server reference.
+- The fragment is not sent in the HTTP request to the site. The recipient
+  reconstructs the game locally and analyzes it with their own browser engine.
+- Generation is capped at **8,000 URL characters** and **300,000 PGN
+  characters**; oversized games are told to export a review file instead.
+- Opening validates version, encoding, base64url characters, JSON shape,
+  settings, PGN and single-game content. Malformed, unsupported, oversized,
+  compressed-over-1,000,000-byte and multi-game links produce clear errors.
+
+### Export and import
+
+**Export review** / **Export game** download a versioned JSON bundle:
+`format: "movelens-review"`, `version: 1`, `exportedAt`, and the same stored
+review record. A completed analysis may be included; a game-only export has
+`analysis: null`. The **Review file** import tab reads the file locally and
+validates format/version, JSON size (20,000,000 characters), storage schema,
+PGN, settings and analysis identity before it saves or displays anything. Share
+links and review bundles are deliberately distinct: a link restores only a
+game, while a bundle may carry a completed review.
+
+### Browser and deployment requirements
+
+Saved reviews need IndexedDB. Analysis needs Web Workers, WebAssembly,
+`MessageChannel`, `AbortController` and `Intl`; export/import uses `File.text()`.
+`CompressionStream` / `DecompressionStream` are optional for creating and
+reading compressed links, with plain-link fallback. The single-threaded Stockfish build
+does **not** need `SharedArrayBuffer`, COOP or COEP headers.
+
+Production must run `pnpm build` followed by `pnpm start` because the Chess.com
+import route is server-side; a static export is not available without replacing
+that feature. `CHESSCOM_API_CONTACT` remains optional and only affects the
+upstream `User-Agent`. See [PRIVACY.md](./PRIVACY.md),
+[SECURITY.md](./SECURITY.md) and
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for data, validation and
+licensing details.
+
+### Measured browser verification (Phase 6)
+
+Verified against the production build (`PORT=3010 pnpm start`) in headless Google
+Chrome `157.0.8103.79` at `1440 × 900` and `390 × 844`, with dark color scheme,
+reduced motion and service workers blocked. `Worker` construction and
+`postMessage` were instrumented before page load, so engine traffic was observed
+rather than inferred from UI text.
+
+| Measurement | Desktop | Mobile |
+| --- | ---: | ---: |
+| Paste-import to “saved in this browser” | 85 ms | 945 ms |
+| First Quick · 12 full analysis to “Analyze again” | 1,339 ms | 2,223 ms |
+| Reload → My reviews → Open completed review | 96 ms | 460 ms |
+| Separate-context share-link analysis | 1,377 ms | 1,370 ms |
+| Horizontal document overflow | 0 px | 0 px |
+| Console/page errors | 0 | 0 |
+
+Additional observed evidence:
+
+- First analysis created exactly **1** Worker and sent **21** `go depth 12`
+  searches for 20 plies (N+1). Before analysis there were 0 workers and 0 searches.
+- Reopening the saved review in a fresh page reported
+  “Saved review restored without rerunning analysis”, showed **Analyze again**,
+  and recorded **0** workers and **0** `go` commands. A mobile header overflow
+  found during the first pass was fixed; the final run had `scrollWidth =
+  clientWidth` on both viewports.
+- Copy share link produced a compressed `review=v1.g.…` fragment of **410**
+  characters, and the native **Share** button was present. A separate browser
+  context opened that link locally, showed “Shared game loaded locally”, and
+  analyzed with its own single Worker (21 searches).
+- Export downloaded `movelens-review-Alice-Bob.json` (185,652 bytes desktop;
+  185,610 mobile) with `format: movelens-review`, versions `1`/`1`,
+  `analysisState: complete` and 20 stored moves. Importing it into another
+  fresh context restored “Analyze again” with **0** engine searches.
+- With two saved rows, per-game delete showed the confirmation
+  “Delete this saved game and its analysis from this browser?”; confirmed
+  clear-all left **0** IndexedDB records. Summary text showed 99.9% / 99.7%
+  accuracy and `20 moves · 21 positions · 12 depth`.
 
 ## Requirements
 
 - Node.js 22.12+, 24+, or 26+ (Vitest 5 requirement; Next.js 16 needs 20.9+)
 - pnpm 11+
+- A current browser with IndexedDB, Web Workers, WebAssembly, `MessageChannel`,
+  `File.text()`, `AbortController` and `Intl`; `CompressionStream` /
+  `DecompressionStream` are optional
+- Outbound HTTPS from the Next.js server to `api.chess.com` for Chess.com import only
 
 ## Getting started
 
@@ -588,7 +723,7 @@ Optional environment variable for the upstream `User-Agent`:
 CHESSCOM_API_CONTACT="you@example.com" pnpm dev
 ```
 
-For production:
+For production (required because `/api/import/chesscom` is a server route):
 
 ```bash
 pnpm build
@@ -596,7 +731,12 @@ CHESSCOM_API_CONTACT="you@example.com" pnpm start
 ```
 
 Chess.com import needs outbound HTTPS access from the Next.js server to
-`api.chess.com`. File and paste PGN imports remain entirely browser-local.
+`api.chess.com`. File, paste and review-file imports, persistence, sharing and
+export stay browser-local. No secrets or API keys are required; do not put
+credentials in `CHESSCOM_API_CONTACT`. Serve the self-hosted engine files under
+`public/engine/` with their normal JavaScript/WASM MIME types. Static hosting
+via a pure `output: "export"` build is not supported while the Chess.com route
+is part of the product.
 
 ## Scripts
 
@@ -618,14 +758,14 @@ src/
     page.tsx / layout.tsx         App Router entry points
   components/
     ui/                           local Button, Card, Badge, Alert, Textarea
-    import/                       import tabs, PGN entry and multi-game picker
-    game/                         board, move list, metadata, navigation, engine panels
-    review/                       graph, bar, annotations, PV viewer, summary, workspace
-    analysis-workspace.tsx        preserves loaded game while import panel is open
+    import/                       import tabs, PGN/review-file entry, multi-game picker
+    game/                         board, move list, navigation, saved-review panel, engine panels
+    review/                       graph, bar, annotations, PV viewer, summary, share/export actions
+    analysis-workspace.tsx        active review, save/restore, share and bundle lifecycle
   hooks/
     use-game-viewer.ts            authoritative ply state and navigation callbacks
     use-engine-analysis.ts        worker-backed single-position analysis state
-    use-full-game-analysis.ts     full-game run state, abort and generation guards
+    use-full-game-analysis.ts     restored result, run state, abort, generation guards and events
     use-variation.ts              non-persistent, identity-keyed PV overlay state
   lib/
     chess/
@@ -669,6 +809,13 @@ src/
       annotations.ts              validated arrows and square highlights
       variation.ts                UCI PV validation, SAN and FEN steps
       key-moments.ts              deterministic turning-point selectors
+    storage/
+      schema.ts                   versioned records, IDs, migration, validation and load
+      review-store.ts             native IndexedDB and in-memory test store
+    share/
+      review-share.ts             bounded hash encoding/decoding and local game restore
+    export/
+      review-bundle.ts            versioned JSON export and validated import
   tests/                          Vitest unit and integration tests
 ```
 
@@ -692,7 +839,16 @@ internal normalized game types.
   metadata; parsing, multi-game handling and viewing stay shared with Phase 1.
 - **No arbitrary fetch URL.** The browser calls a local typed route; the server
   constructs official API URLs and validates returned archive URLs.
-- **No backend persistence, accounts or analytics.**
+- **Browser-native persistence.** Native IndexedDB v1 stores compact, versioned
+  records; no third-party database dependency and no server-side user database.
+- **Deterministic review identity.** Chess.com IDs or PGN/FEN hashes let the
+  same game be saved, reopened and updated; restored analysis is identity-checked.
+- **Hash-fragment sharing.** PGN and minimal settings travel in the URL fragment,
+  optionally gzipped and always size-capped; the recipient analyzes locally.
+- **Portable JSON bundles.** Exports may include a completed analysis; imports
+  validate format, schema, PGN, settings and analysis identity before use.
+- **No backend persistence, accounts, analytics or telemetry.** The only server
+  responsibility is the local Chess.com public-data retrieval route.
 
 ## Dependencies
 
@@ -707,7 +863,7 @@ Development: `typescript`, `eslint`, `eslint-config-next`, `tailwindcss`,
 
 ## Testing and verification
 
-`pnpm typecheck`, `pnpm lint`, `pnpm test` (**30 files, 179 tests**) and
+`pnpm typecheck`, `pnpm lint`, `pnpm test` (**35 files, 207 tests**) and
 `pnpm build` all pass. Automated tests mock external HTTP and Worker I/O; they
 never depend on the live Chess.com API or a bundled engine binary. Coverage
 includes URL/username validation, archive ordering and exact-ID matching,
@@ -742,6 +898,15 @@ significant-move-only board headers, arrow legends derived from rendered arrows,
 variation-only legends, and plain-language move/swing explanations that contain
 no raw engine coordinates or expected-points wording.
 
+Phase 6 tests additionally cover stable and content-sensitive review IDs, JSON
+round-trips of completed analysis, store save/update/touch/delete/list, corrupt
+and future-schema rejection, legacy migration, mismatched-analysis rejection,
+gzip/plain share encoding and decoding, malformed/unsupported/oversized and
+multi-game links, decompression caps, bundle format/version/PGN/analysis checks,
+saved-review UI restore/share/import/delete/clear flows, single-run guard
+recovery after replay failure, overlapping-run rejection, and restored results
+that do not start an engine search.
+
 A live production-server integration check was performed against the official
 API: `POST /api/import/chesscom` with
 `https://www.chess.com/game/live/184727190848` and username `hikaru` returned
@@ -770,7 +935,8 @@ alone were not treated as completion evidence.
 - Opening names come from PGN headers rather than move inference.
 - PGN comments are shown for the move they follow; variations are ignored by
   the viewer (the mainline is analyzed).
-- No persistence: refreshing the page clears the loaded game.
+- Saved reviews are local to one browser profile. There is no cloud sync,
+  account recovery or automatic backup; clearing site data removes them.
 - The single-position engine panel still follows the displayed position;
   navigating clears that panel's evaluation, best move and PV. Full-game review
   results stay attached to the loaded game and settings until they change.
@@ -789,11 +955,21 @@ alone were not treated as completion evidence.
   a neutral point rather than interpolated or fabricated.
 - Review highlights use expected-points data only. There is no validated
   natural-language tactical explanation engine.
+- Share links hold one game only, contain no analysis snapshot, and are capped
+  at 8,000 URL characters; larger games require a review-file export.
+- Share links are readable by anyone who has the URL and are not encrypted or
+  signed. Export files are plain JSON, so importing an unfamiliar file can
+  replace a saved review with the same deterministic ID.
+- Browser storage is subject to quota and eviction. Imported records are
+  validated and size-capped, and compressed share links have a decode cap, but
+  very large local libraries still depend on browser capacity.
+- The Chess.com route requires a running Next.js server and outbound HTTPS;
+  static-only deployment would need that feature removed or replaced.
 - Opening explorer, online databases, accounts, cloud engine, paid APIs,
-  subscriptions, sharing/social and IndexedDB are out of scope.
+  subscriptions, social features and online multiplayer are out of scope.
 - Search time is device-dependent. Full-game Deep analysis and single-position
-  Depth 20 can take noticeably longer on slower CPUs;
-  slower CPUs; the single-threaded build does not use `SharedArrayBuffer`.
+  Depth 20 can take noticeably longer on slower CPUs; the single-threaded build
+  does not use `SharedArrayBuffer`.
 - The engine is GPL-3.0 and self-hosted; public redistribution must satisfy the
   source-notice obligations in `public/engine/ENGINE_LICENSES.md`.
 

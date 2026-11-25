@@ -53,6 +53,10 @@ export function useGameViewer(game: NormalizedGame): GameViewerState {
     () => getPositionStatus(position.fen),
     [position.fen],
   );
+  const lastMove = useMemo(
+    () => (position.move ? { from: position.move.from, to: position.move.to } : undefined),
+    [position.move],
+  );
 
   const goTo = useCallback(
     (ply: number) => setPly(() => clampPly(ply, moveCount)),
@@ -71,9 +75,7 @@ export function useGameViewer(game: NormalizedGame): GameViewerState {
     fen: position.fen,
     status,
     currentMove: position.move,
-    lastMove: position.move
-      ? { from: position.move.from, to: position.move.to }
-      : undefined,
+    lastMove,
     isAtStart: index === 0,
     isAtEnd: index === moveCount,
     goTo,

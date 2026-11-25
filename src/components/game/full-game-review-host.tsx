@@ -3,10 +3,11 @@
 import type { ReactNode } from "react";
 import {
   useFullGameAnalysis,
+  type FullGameAnalysisEvent,
   type UseFullGameAnalysisResult,
 } from "@/hooks/use-full-game-analysis";
 import { createAnalysisIdentity } from "@/lib/analysis/settings";
-import type { AnalysisSettings } from "@/lib/analysis/types";
+import type { AnalysisSettings, FullGameAnalysis } from "@/lib/analysis/types";
 import type { NormalizedGame } from "@/lib/chess/types";
 
 /**
@@ -17,13 +18,20 @@ import type { NormalizedGame } from "@/lib/chess/types";
 export function FullGameReviewHost({
   game,
   settings,
+  initialResult,
+  onAnalysisEvent,
   children,
 }: {
   game: NormalizedGame;
   settings: AnalysisSettings;
+  initialResult?: FullGameAnalysis | null;
+  onAnalysisEvent?: (event: FullGameAnalysisEvent) => void;
   children: (analysis: UseFullGameAnalysisResult) => ReactNode;
 }) {
-  const analysis = useFullGameAnalysis(game, settings);
+  const analysis = useFullGameAnalysis(game, settings, {
+    initialResult,
+    onEvent: onAnalysisEvent,
+  });
   return <>{children(analysis)}</>;
 }
 

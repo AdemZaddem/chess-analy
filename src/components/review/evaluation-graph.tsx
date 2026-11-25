@@ -53,15 +53,15 @@ export function EvaluationGraph({
       y: yFor(point.plotValue),
     }));
     const centerY = yFor(0);
-    return { positioned, centerY, minPly, maxPly };
+    const path = positioned
+      .map(({ x, y }, index) => `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`)
+      .join(" ");
+    return { positioned, centerY, minPly, maxPly, path };
   }, [points]);
 
   const active = hoverPly === null
     ? points.find((point) => point.ply === selectedPly)
     : points.find((point) => point.ply === hoverPly);
-  const path = layout.positioned
-    .map(({ x, y }, index) => `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`)
-    .join(" ");
 
   return (
     <Card className={className}>
@@ -114,7 +114,7 @@ export function EvaluationGraph({
                 />
               ))}
 
-              <path d={path} fill="none" stroke="#dce9df" strokeWidth={2} strokeLinejoin="round" />
+              <path d={layout.path} fill="none" stroke="#dce9df" strokeWidth={2} strokeLinejoin="round" />
 
               {layout.positioned.map(({ point, x, y }) => {
                 const selected = point.ply === selectedPly;

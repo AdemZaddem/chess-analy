@@ -33,6 +33,7 @@ import { buildEvaluationGraph } from "@/lib/review/evaluation";
 import { BoardReviewHints } from "./board-review-hints";
 import { EvaluationBar } from "./evaluation-bar";
 import { EvaluationGraph } from "./evaluation-graph";
+import { ReviewActions } from "./review-actions";
 import { ReviewSummary } from "./review-summary";
 import { VariationViewer } from "./variation-viewer";
 
@@ -322,6 +323,7 @@ export function ReviewWorkspace({
 
       <div className="min-w-0 space-y-5">
         <ReviewSummary game={game} analysis={result} onSelectPly={selectPly} />
+        <ReviewActions game={game} settings={settings} analysis={result} />
         <FullGameAnalysisPanel
           settings={settings}
           preset={preset}

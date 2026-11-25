@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Award, Flame, Target, Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,9 +40,9 @@ export function ReviewSummary({
   analysis: FullGameAnalysis | null | undefined;
   onSelectPly: (ply: number) => void;
 }) {
-  const moments = buildKeyMoments(analysis);
-  const mistakes = biggestMistakes(analysis);
-  const strongest = strongestMoves(analysis);
+  const moments = useMemo(() => buildKeyMoments(analysis), [analysis]);
+  const mistakes = useMemo(() => biggestMistakes(analysis), [analysis]);
+  const strongest = useMemo(() => strongestMoves(analysis), [analysis]);
 
   if (!analysis) {
     return (

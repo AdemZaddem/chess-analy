@@ -1,17 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, FolderOpen, LoaderCircle, Sparkles, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ReviewWorkspace } from "@/components/review/review-workspace";
+import type { FullGameAnalysisEvent } from "@/hooks/use-full-game-analysis";
 import { useGameViewer } from "@/hooks/use-game-viewer";
+import type { FullGameAnalysis } from "@/lib/analysis/types";
 import {
   createAnalysisSettings,
   type SelectablePreset,
 } from "@/lib/analysis/settings";
 import type { PositionStatus } from "@/lib/chess/game-navigation";
 import type { GameSource, NormalizedGame } from "@/lib/chess/types";
+import type { ReviewAnalysisState } from "@/lib/storage/schema";
 import {
   FullGameReviewHost,
   fullGameReviewKey,
@@ -27,7 +30,7 @@ const statusLabels: Record<PositionStatus, string> = {
 
 function sourceLabel(source: GameSource): string {
   if (source.kind === "chesscom") {
-    return `Imported from Chess.com · ${source.gameType} #${source.gameId}`;
+    return `Imported from Chess.com · ${source.gameType} #${source.gameId}${source.username ? ` · ${source.username}` : ""}`;
   }
   if (source.kind === "file") return source.filename ?? "PGN file";
   return "Pasted PGN";
@@ -42,14 +45,24 @@ export function GameViewer({
   game,
   onReset,
   onImportAnother,
+  initialPreset = "standard",
+  initialAnalysis = null,
+  restoredState = "not-started",
+  onAnalysisEvent,
+  onOpenSaved,
 }: {
   game: NormalizedGame;
   onReset: () => void;
   onImportAnother?: () => void;
+  initialPreset?: SelectablePreset;
+  initialAnalysis?: FullGameAnalysis | null;
+  restoredState?: ReviewAnalysisState;
+  onAnalysisEvent?: (event: FullGameAnalysisEvent) => void;
+  onOpenSaved?: () => void;
 }) {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [analysisPreset, setAnalysisPreset] =
-    useState<SelectablePreset>("standard");
+    useState<SelectablePreset>(initialPreset);
   const analysisSettings = useMemo(
     () => createAnalysisSettings(analysisPreset),
     [analysisPreset],
@@ -97,7 +110,7 @@ export function GameViewer({
   return (
     <section className="space-y-5" aria-label="Game analysis workspace">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <Button variant="secondary" size="sm" onClick={onReset}>
             <ArrowLeft className="size-4" aria-hidden />
             New analysis
@@ -108,11 +121,17 @@ export function GameViewer({
               Import another
             </Button>
           ) : null}
-          <div>
-            <h2 className="text-sm font-semibold text-ink">
+          {onOpenSaved ? (
+            <Button variant="ghost" size="sm" onClick={onOpenSaved}>
+              <FolderOpen className="size-4" aria-hidden />
+              My reviews
+            </Button>
+          ) : null}
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-ink">
               {game.metadata.white.name} vs {game.metadata.black.name}
             </h2>
-            <p className="text-xs text-muted">
+            <p className="truncate text-xs text-muted">
               {game.gameCount > 1
                 ? `Game ${game.gameIndex} of ${game.gameCount}`
                 : sourceLabel(game.source)}
@@ -144,7 +163,25 @@ export function GameViewer({
         </p>
       ) : null}
 
-      <FullGameReviewHost key={analysisKey} game={game} settings={analysisSettings}>
+      {restoredState === "running" || restoredState === "incomplete" ? (
+        <p
+          role="status"
+          className="flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-2.5 text-xs leading-relaxed text-amber-100/90"
+        >
+          <LoaderCircle className="size-3.5 shrink-0" aria-hidden />
+          {restoredState === "running"
+            ? "A previous analysis was interrupted. The game and settings were restored; run the review again to continue."
+            : "This review was saved without a completed analysis. Run it locally when you are ready."}
+        </p>
+      ) : null}
+
+      <FullGameReviewHost
+        key={analysisKey}
+        game={game}
+        settings={analysisSettings}
+        initialResult={initialAnalysis}
+        onAnalysisEvent={onAnalysisEvent}
+      >
         {(analysis) => (
           <ReviewWorkspace
             game={game}

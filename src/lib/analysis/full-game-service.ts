@@ -195,9 +195,8 @@ export class FullGameAnalysisRunner {
     let analyzedPositions = 0;
     let downloadPercent: number | undefined;
     let engineName: string | undefined;
-
-    const positions = buildGamePositions(request.game);
-    const totalPositions = positions.length;
+    let positions: ReturnType<typeof buildGamePositions> | null = null;
+    let totalPositions = 0;
 
     const emit = (message?: string): void => {
       request.onProgress?.({
@@ -205,8 +204,8 @@ export class FullGameAnalysisRunner {
         status,
         analyzedPositions,
         totalPositions,
-        currentPly: positions[Math.min(analyzedPositions, positions.length - 1)]?.ply ?? 0,
-        currentFen: positions[Math.min(analyzedPositions, positions.length - 1)]?.fen ?? "",
+        currentPly: positions?.[Math.min(analyzedPositions, Math.max(0, positions.length - 1))]?.ply ?? 0,
+        currentFen: positions?.[Math.min(analyzedPositions, Math.max(0, positions.length - 1))]?.fen ?? "",
         percent: totalPositions ? analyzedPositions / totalPositions : 1,
         startedAt,
         elapsedMs: Date.now() - startedAt,
@@ -240,6 +239,9 @@ export class FullGameAnalysisRunner {
     emit("Preparing Stockfish…");
 
     try {
+      positions = buildGamePositions(request.game);
+      totalPositions = positions.length;
+      const runPositions = positions;
       if (isAborted(request.signal)) throw cancellation();
       await this.engine.initialize?.();
       engineName ??= this.engine.getIdentity?.().name;
@@ -249,7 +251,7 @@ export class FullGameAnalysisRunner {
       const cache = new Map<string, EngineEvaluation>();
       const evaluated: AnalyzedPosition[] = [];
 
-      for (const position of positions) {
+      for (const position of runPositions) {
         if (isAborted(request.signal)) throw cancellation();
         emit(position.move ? `Analyzing ${position.move.san}` : "Analyzing initial position");
 
