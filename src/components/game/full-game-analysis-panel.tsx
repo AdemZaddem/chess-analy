@@ -13,46 +13,13 @@ import { ErrorAlert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CLASSIFICATION_LABELS } from "@/lib/analysis/labels";
+import { MoveInspector } from "@/components/review/move-inspector";
 import {
   ANALYSIS_PRESETS,
   type SelectablePreset,
 } from "@/lib/analysis/settings";
-import type {
-  AnalysisSettings,
-  ClassificationCounts,
-  PositionEvaluation,
-} from "@/lib/analysis/types";
+import type { AnalysisSettings } from "@/lib/analysis/types";
 import type { UseFullGameAnalysisResult } from "@/hooks/use-full-game-analysis";
-
-const SUMMARY_ROWS: Array<{
-  key: keyof ClassificationCounts;
-  label: string;
-}> = [
-  { key: "brilliant", label: "Brilliant" },
-  { key: "great", label: "Great" },
-  { key: "inaccuracy", label: "Inaccuracies" },
-  { key: "mistake", label: "Mistakes" },
-  { key: "blunder", label: "Blunders" },
-  { key: "missedWin", label: "Missed wins" },
-];
-
-function formatPercent(value: number): string {
-  return `${value.toFixed(1)}%`;
-}
-
-function formatEvaluation(evaluation: PositionEvaluation): string {
-  return evaluation.score.label;
-}
-
-function formatPv(moves: string[]): string {
-  if (!moves.length) return "—";
-  return moves
-    .map((move, index) =>
-      index % 2 === 0 ? `${Math.floor(index / 2) + 1}. ${move}` : move,
-    )
-    .join(" ");
-}
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
@@ -205,38 +172,7 @@ export function FullGameAnalysisPanel({
         ) : null}
 
         {result ? (
-          <div className="space-y-4 rounded-xl border border-line-soft bg-canvas/50 p-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg border border-line-soft bg-surface-2/50 p-2.5">
-                <p className="text-[11px] uppercase tracking-wider text-muted">
-                  White accuracy
-                </p>
-                <p className="text-xl font-semibold text-ink">
-                  {formatPercent(result.accuracy.white.accuracy)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-line-soft bg-surface-2/50 p-2.5">
-                <p className="text-[11px] uppercase tracking-wider text-muted">
-                  Black accuracy
-                </p>
-                <p className="text-xl font-semibold text-ink">
-                  {formatPercent(result.accuracy.black.accuracy)}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              {SUMMARY_ROWS.map((row) => (
-                <div
-                  key={row.key}
-                  className="rounded-lg border border-line-soft bg-surface-2/40 p-2 text-center"
-                >
-                  <p className="text-base font-semibold text-ink">{result.counts[row.key]}</p>
-                  <p className="text-[10px] uppercase tracking-wide text-muted">{row.label}</p>
-                </div>
-              ))}
-            </div>
-
+          <div className="space-y-3 rounded-xl border border-line-soft bg-canvas/50 p-3">
             <p className="text-[11px] text-muted">
               {result.moves.length} moves · {result.positions.length} positions ·{" "}
               {result.settings.depth} depth · {formatDuration(result.durationMs)}
@@ -251,50 +187,7 @@ export function FullGameAnalysisPanel({
               </p>
             ))}
 
-            <div className="border-t border-line-soft pt-3">
-              <p className="text-[11px] uppercase tracking-wider text-muted">
-                Selected move
-              </p>
-              {selectedMove ? (
-                <div className="mt-2 space-y-2 text-xs">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm text-ink">
-                      {selectedMove.san}{" "}
-                      <span className="text-muted">({selectedMove.uci})</span>
-                    </span>
-                    <Badge variant={CLASSIFICATION_LABELS[selectedMove.classification].tone}>
-                      {CLASSIFICATION_LABELS[selectedMove.classification].symbol}{" "}
-                      {CLASSIFICATION_LABELS[selectedMove.classification].label}
-                    </Badge>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono">
-                    <span>Eval before: {formatEvaluation(selectedMove.positionBefore)}</span>
-                    <span>Eval after: {formatEvaluation(selectedMove.positionAfter)}</span>
-                    <span>
-                      Best: {selectedMove.bestMoveSan ?? selectedMove.bestMove ?? "—"}
-                    </span>
-                    <span>
-                      Loss: {selectedMove.expectedPointsLoss.toFixed(3)}
-                    </span>
-                  </div>
-                  <p className="leading-relaxed text-muted">
-                    PV: {formatPv(selectedMove.principalVariationSan)}
-                  </p>
-                  <p className="font-mono text-[11px] text-muted">
-                    {formatPv(selectedMove.principalVariation)}
-                  </p>
-                  {selectedMove.classificationReasons.length ? (
-                    <p className="leading-relaxed text-muted">
-                      {selectedMove.classificationReasons.join(" · ")}
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="mt-2 text-xs leading-relaxed text-muted">
-                  Select a move in the move list to inspect its analysis.
-                </p>
-              )}
-            </div>
+            <MoveInspector move={selectedMove} />
           </div>
         ) : null}
 

@@ -114,7 +114,7 @@ describe("FullGameAnalysisPanel", () => {
     expect(analysis.cancel).toHaveBeenCalledOnce();
   });
 
-  it("renders accuracy, counts and the selected move inspector", async () => {
+  it("renders the selected move inspector with engine-grounded facts", async () => {
     const result = await completedAnalysis();
     const analysis = mockHook(result);
     const { container } = render(
@@ -127,12 +127,10 @@ describe("FullGameAnalysisPanel", () => {
       />,
     );
 
-    expect(container.textContent).toContain("White accuracy");
-    expect(container.textContent).toContain("Black accuracy");
-    expect(container.textContent).toContain("Brilliant");
-    expect(container.textContent).toContain("Missed wins");
     expect(container.textContent).toContain("Selected move");
     expect(container.textContent).toContain("g8=Q");
     expect(container.textContent).toContain("PV:");
+    expect(container.textContent).toContain("Eval before:");
+    expect(container.textContent).toContain("Depth:");
   });
 });

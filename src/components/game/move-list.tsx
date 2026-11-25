@@ -65,6 +65,8 @@ export function MoveList({
         type="button"
         onClick={() => onSelect(move.ply)}
         aria-current={active ? "step" : undefined}
+        aria-label={`${move.moveNumber}${move.color === "b" ? "..." : "."} ${move.san}${meta ? `, ${meta.label}` : ""}`}
+        data-ply={move.ply}
         className={cn(
           "flex h-8 min-w-0 flex-1 items-center gap-1 rounded-md px-2 text-left font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
           active
@@ -80,7 +82,7 @@ export function MoveList({
               active ? "text-emerald-950" : toneClasses[meta.tone],
             )}
             title={`${meta.label} move`}
-            aria-label={`${meta.label} move`}
+            aria-hidden
           >
             {meta.symbol}
           </span>

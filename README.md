@@ -2,9 +2,9 @@
 
 A free, local-first chess game analysis website. The project includes
 **Phase 1: Foundation and PGN viewer**, **Phase 2: Public Chess.com game
-import**, **Phase 3: Local Stockfish single-position analysis**, and
+import**, **Phase 3: Local Stockfish single-position analysis**,
 **Phase 4: Full-game review with deterministic move classification and
-accuracy**.
+accuracy**, and **Phase 5: Interactive game review and visual analysis**.
 
 Users can import a public Chess.com game by URL and username, upload a `.pgn`
 file, or paste PGN notation. Games are normalized once, replayed on an
@@ -35,10 +35,13 @@ Implemented:
 - Deterministic move labels and transparent White / Black accuracy
 - Progress, cancel, retry, stale-result rejection and move-by-move inspection
 - Move-list classification indicators tied to the selected game and settings
+- Interactive evaluation graph and evaluation bar sharing one scaling convention
+- Played/best-move arrows, square highlights and a validated PV variation viewer
+- Review summary with accuracy, classification counts and data-driven key moments
+- Board-adjacent significant-move header and plain-language arrow legend
 
 Not implemented yet (planned for later phases):
 
-- Evaluation graphs, interactive evaluation bars and advanced arrow annotations
 - Move-by-move opening explorer or online opening database
 - IndexedDB persistence and history dashboard
 - Authentication, accounts, sharing/social, cloud engine or paid APIs
@@ -362,11 +365,11 @@ loss is added.
 
 `FullGameAnalysisPanel` provides the explicit **Analyze full game** / **Analyze
 again** action, preset buttons, an `aria-live` progress region with analyzed
-count and cancel button, retry on error, White/Black accuracy, classification
-counts, duration/warning text, and a selected-move inspector with eval before,
-eval after, best move, loss, SAN/UCI PV and reasons. `MoveList` shows compact
-classification indicators for analyzed moves and keeps them tied to the
-selected game through the keyed host.
+count and cancel button, retry on error, duration/warning text, and the
+`MoveInspector` with eval before, eval after, best move, expected-points change,
+depth, SAN/UCI PV and reasons. In Phase 5, accuracy and counts moved to
+`ReviewSummary`, and `MoveList` shows accessible classification indicators tied
+to the selected game through the keyed host.
 
 ### Measured browser verification (Phase 4)
 
@@ -386,6 +389,184 @@ The engine identity was `Stockfish 19 Lite WASM`, and the page loaded
 `/engine/stockfish-19-lite-single.js` as a real Worker asset. Move-list
 indicators (`★` / `✓`) were present. A repeat run completed in `874 ms`.
 These are warm local-machine measurements; deeper presets take longer.
+
+## Interactive game review (Phase 5)
+
+Phase 5 is presentation over the existing Phase 4 result. It does not add
+analysis algorithms, change classification or accuracy, start a second engine,
+or reanalyze moves when the user navigates. `useGameViewer` remains the single
+authoritative game ply; `useVariation` is an explicitly non-persistent overlay.
+
+### Architecture
+
+| File | Role |
+| --- | --- |
+| `src/lib/review/evaluation.ts` | Shared saturation, mate labels, plotting value and graph-point builder |
+| `src/components/review/evaluation-graph.tsx` | Interactive SVG graph; click/keyboard navigation |
+| `src/components/review/evaluation-bar.tsx` | Vertical bar beside the board |
+| `src/lib/review/annotations.ts` | Validated arrows, square highlights and shared arrow colors |
+| `src/components/review/board-review-hints.tsx` | Board-adjacent significant-move header and arrow legend |
+| `src/lib/review/explanations.ts` | Plain-language, engine-grounded move and swing descriptions |
+| `src/lib/review/variation.ts` | UCI→SAN/FEN validation with rejection index |
+| `src/hooks/use-variation.ts` | Identity-keyed variation step overlay, reset on game/PV change |
+| `src/components/review/variation-viewer.tsx` | PV notation, step controls and return-to-game |
+| `src/components/review/move-inspector.tsx` | Grounded move facts from the Phase 4 `MoveAnalysis` |
+| `src/lib/review/key-moments.ts` | Deterministic turning-point and strongest-move selectors |
+| `src/components/review/review-summary.tsx` | Accuracy, counts, result, metadata and clickable moments |
+| `src/components/review/review-workspace.tsx` | Composition and synchronization point |
+| `src/components/game/game-viewer.tsx` | Slim shell: keyboard navigation, preset identity and keyed analysis host |
+
+`FullGameReviewHost` is still keyed by game/settings identity. Changing game or
+depth remounts analysis state and clears the old graph, annotations, inspector
+and navigation overlay. Navigation from the graph, move list, navigation
+buttons or key moments always calls the same `selectPly`, which exits any
+variation overlay before moving the authoritative ply.
+
+### Graph scaling
+
+Both the graph and the bar call `evaluationPlotValue`, so they cannot disagree:
+
+```text
+|v| <= 4 pawns: plot = v
+|v| >  4 pawns: plot = sign(v) * (4 + 6 * (1 - exp(-(|v| - 4) / 4)))
+mate:          plot = sign(mate) * 9.5, with a diamond marker and M-label
+axis:          [-10, +10] White pawns; White advantage is above centre
+```
+
+Centipawns are divided by 100 and normalized to White perspective before
+plotting. Large advantages saturate smoothly instead of stretching the axis.
+Mate is never plotted as an ordinary centipawn score; `M2` means mate in two
+fullmoves, derived from the engine's ply count. Missing evaluations become a
+neutral point and are visually de-emphasized, never invented. The graph
+includes the initial position (ply 0), every analyzed ply and the final
+position, even if an intermediate evaluation is absent. Classification tones
+color the points, and the selected point gets a vertical guide. Hovering or
+focusing shows that position's evaluation; clicking or pressing Enter/Space
+navigates. It is a hand-built responsive SVG; no chart library was added.
+
+### Evaluation bar
+
+`whiteBarShare = clamp(0.5 + plotValue / 20, 0, 1)`. For white orientation the
+bar is Black (top) / White (bottom); flipping the board reverses the segments.
+Equal and missing evaluations both show 50/50, but missing data is labelled
+`Evaluation unavailable` through `aria-valuetext` rather than implying a real
+score. Mate positions show `M<n>` on the winning side. The bar reads the same
+`PositionEvaluation` as the graph at the authoritative ply; while browsing a
+variation it deliberately keeps the game position's evaluation.
+
+### Board annotations
+
+`react-chessboard` 5.12.4 already exposes `arrows` and `squareStyles`; those
+controlled options are used with dragging and free drawing disabled. A played
+move is yellow, the engine best move is violet and the active variation move is
+blue, each with origin/destination highlights. Every arrow is validated against
+the displayed FEN with the existing `validateUciMove`, so a stale best move is
+silently dropped. Variation moves take priority over game annotations; at most
+two arrows are ever shown so the board remains readable. Arrows are cleared
+explicitly by changing derived props, not by allowing the board to mutate game
+state. The arrow colors are exported and reused by a compact board-adjacent
+legend, so the visible swatches cannot drift from the actual arrows.
+
+For notable classifications only, a small header beside the board shows the
+label, the side, the move played and one plain-language sentence such as
+`Blunder — Black played g6 — This sharply reduced Black's chances`. Ordinary
+Good, Excellent and Book moves get no banner. While browsing a variation the
+classification header is suppressed, leaving only the variation legend so the
+overlay cannot be mistaken for a game move.
+
+### Variation viewer and validation
+
+The engine PV from the selected move is validated from that move's **resulting**
+FEN with `validateVariation` and then replayed token-by-token with
+`validateUciMove`. Castling, promotion and en passant go through chess.js; the
+first illegal token sets `rejectedAt` and truncates the line. Each step carries
+SAN plus `fenBefore`/`fenAfter`, so the board, arrow and notation all agree.
+`useVariation` stores the step index together with the base-FEN/PV identity;
+changing the selected move or game presents index 0 without an effect-driven
+extra render. `Step into line`, move buttons, `Next`, `Previous` and
+`Return to game` never call `useGameViewer`, so the PGN and game history are
+unchanged. Move numbering accounts for a Black-to-move start (`1... e5 2. Nf3`).
+
+### Summary and key moments
+
+`ReviewSummary` shows White/Black accuracy, result, move/position counts,
+depth, opening/ECO metadata and counts for Brilliant, Great, Inaccuracy,
+Mistake, Blunder and Missed win. Book remains in the type but is never emitted.
+Key moments are deterministic and data-driven, in priority order:
+
+1. Biggest blunder — highest expected-points loss among blunders.
+2. Missed win — highest expected-points loss among missed wins.
+3. Brilliant move — strongest expected-points result among brilliant moves.
+4. Largest evaluation swing — largest `|expectedPointsWhite(after) - before|`.
+5. Critical defensive move — low pre-move expected points (≤ 0.45), loss
+   ≤ 0.05, Best/Great/Excellent label.
+
+A ply appears at most once; empty categories produce no card. Biggest losses
+sort by expected-points loss; strongest moves require ≤ 0.05 loss and a
+positive label. Every summary row is a button that navigates to that ply.
+Key-moment details and the board header use `describeMoveClassification` and
+`describeEvaluationSwing`, which describe chances, the engine's preferred move
+and balance shifts without requiring engine-score knowledge. The inspector
+keeps the raw engine facts in an `Engine detail` line (scores, best move, loss,
+depth, PV, reasons and capture/promotion/sacrifice/forced flags); no tactical
+narrative is invented.
+
+### Responsiveness and performance
+
+On desktop the board and graph occupy the main column with analysis controls in
+a sidebar; below `lg` everything stacks in one narrow column. The board uses a
+bounded `max-w-[620px]` container and the SVG scales to its parent. Graph
+points and board options are memoized; navigation only changes derived
+selections, never starts a search. One shared engine worker remains in use.
+There is no chart dependency and no extra animation beyond the existing board
+move transition.
+
+### Measured browser verification (Phase 5)
+
+Verified against the production build served with `PORT=3010 pnpm start`, using
+headless Google Chrome 157.0.8103.79 with a dark color scheme, reduced motion
+and blocked service workers. A 20-ply Ruy Lopez/C60 PGN was imported through
+**Paste PGN**, analyzed with **Quick · 12**, and reached the **Analyze again**
+state in 871 ms in the REA scenario and 954 ms / 956 ms in the post-audit
+desktop / mobile Playwright runs. No console or page errors were recorded.
+
+- REA controlled browser scenario: `ev_9144168b5ac39765bae0e58e7ca30cde762b58e25f78f02cc603f6a8ad48db18`, completeness `complete`.
+- Navigation: clicking `button[data-ply='1']` updated the inspector; clicking
+  graph point `g[data-ply='8']` set both `aria-pressed` on the graph and
+  `aria-current="step"` on the move list to ply 8, with the label
+  `Move 4… · Nf6`. Clicking a key moment synchronized graph and move list to
+  ply 16.
+- Variation overlay: `Step into line`, `Next` and `Return to game` worked; the
+  status read `Viewing engine variation · move 2 of 9. The game itself is
+  unchanged.`, the blue variation arrow was present, and the game move stayed
+  on ply 8 throughout. Board DOM contained the yellow played arrow
+  (`e8-g8`) and violet engine arrow (`h2-h3`).
+- Board hints: after selecting ply 1 the board-adjacent strip read
+  `★ Best — White played e4 — This matched the engine's top move.` with legend
+  `Played move / Engine choice`. During a variation it switched to
+  `Variation step` and hid the game-move classification, matching the rendered
+  arrow and avoiding ambiguity.
+- Eval bar: `role="meter"` reported `aria-valuetext="White 52%, Black 48%"`
+  and `aria-valuenow="52"`. After **Flip board**, the white segment became the
+  first/top segment.
+- Summary DOM: `1-0 · White won`, White accuracy `99.9%`, Black accuracy
+  `99.7%`, `20 moves · 21 positions · 12 depth`, `Ruy Lopez C60`, and key
+  moments `Largest evaluation swing 16. O-O...` and
+  `Critical defensive move 20. Nbd7...`. Graph accessible label reported
+  `Evaluation graph, 21 positions, White above the centre line`.
+
+| Viewport | Document width | Horizontal overflow | Board / bar | Graph | Key moments |
+| --- | --- | --- | --- | --- | --- |
+| 1440 × 900 | `scrollWidth = clientWidth = 1440` | none | 600 × 600 board with 20 × 600 bar beside it | 802 × 224 | sidebar at x=985, width 326 |
+| 390 × 844 | `scrollWidth = clientWidth = 390` | none | 316 × 316 board with 16 × 316 bar | 332 × 176 | stacked at x=29, width 332 |
+
+Screenshots were captured at
+`/private/var/folders/vv/7f2xgzyx6gj9w_yll6px092c0000gn/T/opencode/phase5-{desktop,mobile}-{variation,final}.png`
+with verified dimensions 1440 × 900 and 390 × 844. Vision OCR of the captured
+pixels confirmed visible `Review summary`, `WHITE ACCURACY 99.9%`,
+`BLACK ACCURACY 99.7%`, `20 moves`, `21 positions`, `depth 12`, `Ruy Lopez C60`,
+`Evaluation`, `Engine variation`, `Key moments`, `Step into line` and
+`Return to game` labels on the expected layouts.
 
 ## Requirements
 
@@ -439,11 +620,13 @@ src/
     ui/                           local Button, Card, Badge, Alert, Textarea
     import/                       import tabs, PGN entry and multi-game picker
     game/                         board, move list, metadata, navigation, engine panels
+    review/                       graph, bar, annotations, PV viewer, summary, workspace
     analysis-workspace.tsx        preserves loaded game while import panel is open
   hooks/
-    use-game-viewer.ts            ply state and navigation callbacks
+    use-game-viewer.ts            authoritative ply state and navigation callbacks
     use-engine-analysis.ts        worker-backed single-position analysis state
     use-full-game-analysis.ts     full-game run state, abort and generation guards
+    use-variation.ts              non-persistent, identity-keyed PV overlay state
   lib/
     chess/
       types.ts                    normalized game, move and metadata types
@@ -481,6 +664,11 @@ src/
       full-game-service.ts        sequential runner, progress, cache and guards
       labels.ts                   shared UI labels and symbols
       errors.ts                   stable full-game error codes
+    review/
+      evaluation.ts               shared scaling, mate handling and graph data
+      annotations.ts              validated arrows and square highlights
+      variation.ts                UCI PV validation, SAN and FEN steps
+      key-moments.ts              deterministic turning-point selectors
   tests/                          Vitest unit and integration tests
 ```
 
@@ -519,7 +707,7 @@ Development: `typescript`, `eslint`, `eslint-config-next`, `tailwindcss`,
 
 ## Testing and verification
 
-`pnpm typecheck`, `pnpm lint`, `pnpm test` (**22 files, 137 tests**) and
+`pnpm typecheck`, `pnpm lint`, `pnpm test` (**30 files, 179 tests**) and
 `pnpm build` all pass. Automated tests mock external HTTP and Worker I/O; they
 never depend on the live Chess.com API or a bundled engine binary. Coverage
 includes URL/username validation, archive ordering and exact-ID matching,
@@ -540,6 +728,19 @@ searches with no overlap, progress emission, cancellation, engine failure and
 retry, reanalysis, game switching, stale-result rejection, explicit-no-autostart
 UI controls, progress/cancel rendering, accuracy/counts summary and selected-move
 inspection.
+
+Phase 5 tests additionally cover linear/saturated evaluation scaling, mate
+labeling and bounded plotting, identical bar/graph normalization, missing and
+incomplete analysis, graph click/keyboard navigation, evaluation-bar orientation
+and unavailable state, played/best/variation arrows with FEN validation, illegal
+arrow rejection, UCI→SAN conversion including castling/promotion/en passant,
+illegal PV truncation, black-to-move numbering, variation navigation/reset and
+return-to-game, data-driven key moments with empty categories, review summary
+navigation, and one authoritative ply across board, move list, graph and key
+moments including game switching. The UI audit refinements add tests for
+significant-move-only board headers, arrow legends derived from rendered arrows,
+variation-only legends, and plain-language move/swing explanations that contain
+no raw engine coordinates or expected-points wording.
 
 A live production-server integration check was performed against the official
 API: `POST /api/import/chesscom` with
@@ -580,8 +781,15 @@ alone were not treated as completion evidence.
 - Accuracy and labels use the documented formulas/heuristics above; they are
   not Chess.com's proprietary values. Uncertain, shallow or incomplete
   engine data withholds special labels.
-- Evaluation graphs, interactive evaluation bars, advanced arrows/annotations,
-  opening explorer, online databases, accounts, cloud engine, paid APIs,
+- The graph plots mate at a bounded ±9.5 pawns with a distinct marker; it does
+  not put mate on the same numeric scale as centipawns.
+- Only one engine PV is available (`MultiPV 1`), so alternative-move arrows are
+  not shown. The variation viewer follows the top line only.
+- The graph connects adjacent analyzed plies; a missing evaluation is drawn as
+  a neutral point rather than interpolated or fabricated.
+- Review highlights use expected-points data only. There is no validated
+  natural-language tactical explanation engine.
+- Opening explorer, online databases, accounts, cloud engine, paid APIs,
   subscriptions, sharing/social and IndexedDB are out of scope.
 - Search time is device-dependent. Full-game Deep analysis and single-position
   Depth 20 can take noticeably longer on slower CPUs;

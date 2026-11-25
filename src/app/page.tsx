@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   ChartNoAxesCombined,
   FileText,
+  GitBranch,
   ShieldCheck,
 } from "lucide-react";
 
@@ -18,6 +19,12 @@ const features = [
     title: "Local engine analysis",
     description:
       "Analyze one position or the whole game with self-hosted Stockfish 19 Lite WASM in a Web Worker. Choose depth presets and review every move.",
+  },
+  {
+    icon: GitBranch,
+    title: "Interactive review",
+    description:
+      "Follow the evaluation graph, bar and board arrows, jump to key moments, and step through validated engine variations without changing your game.",
   },
   {
     icon: ShieldCheck,
@@ -39,7 +46,7 @@ export default function Home() {
             MoveLens
           </span>
         </div>
-        <Badge variant="success">Phase 4 · Full-game review</Badge>
+        <Badge variant="success">Phase 5 · Interactive game review</Badge>
       </header>
 
       <section className="mx-auto mt-14 max-w-3xl text-center sm:mt-20">
@@ -50,8 +57,8 @@ export default function Home() {
         </h1>
         <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
           Import a PGN, replay every position with accurate navigation, then
-          analyze one position or the whole game with a local Stockfish engine.
-          A clean workspace for understanding the games you already played.
+          analyze the whole game with a local Stockfish engine. Follow evaluation
+          swings, key moments and validated engine lines in one review workspace.
         </p>
       </section>
 
@@ -60,7 +67,7 @@ export default function Home() {
       </div>
 
       <section
-        className="mt-14 grid gap-4 sm:grid-cols-3"
+        className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
         aria-label="Product highlights"
       >
         {features.map(({ icon: Icon, title, description }) => (
@@ -79,7 +86,7 @@ export default function Home() {
 
       <footer className="mt-12 flex flex-col gap-2 border-t border-line-soft pt-6 text-xs text-muted/80 sm:flex-row sm:items-center sm:justify-between">
         <p>MoveLens · A free, local-first chess analysis workspace.</p>
-        <p>Local single-position and full-game engine analysis.</p>
+        <p>Local engine analysis and interactive, visual game review.</p>
       </footer>
     </main>
   );
