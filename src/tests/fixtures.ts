@@ -38,6 +38,24 @@ export const STALEMATE_PGN = `[SetUp "1"]
 
 1. Kg6 1/2-1/2`;
 
+export const LONG_PGN = `[Event "Long game"]
+[White "Alice"]
+[Black "Bob"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 9. h3 Nb8 10. d4 Nbd7 *`;
+
+export const BLACK_TO_MOVE_FEN_PGN = `[SetUp "1"]
+[FEN "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"]
+[White "Alice"]
+[Black "Bob"]
+
+1. e5 *`;
+
+export const REPETITION_PGN = `[White "Alice"]
+[Black "Bob"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 *`;
+
 export const CUSTOM_FEN_PGN = `[Event "Custom position"]
 [SetUp "1"]
 [FEN "8/8/8/8/8/8/4P3/4K2k w - - 3 7"]

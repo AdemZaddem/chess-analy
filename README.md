@@ -1,13 +1,18 @@
 # MoveLens
 
-A free, local-first chess game analysis website. The project currently includes
-**Phase 1: Foundation and PGN viewer** and **Phase 2: Public Chess.com game
-import**.
+A free, local-first chess game analysis website. The project includes
+**Phase 1: Foundation and PGN viewer**, **Phase 2: Public Chess.com game
+import**, **Phase 3: Local Stockfish single-position analysis**, and
+**Phase 4: Full-game review with deterministic move classification and
+accuracy**.
 
 Users can import a public Chess.com game by URL and username, upload a `.pgn`
 file, or paste PGN notation. Games are normalized once, replayed on an
 interactive board, and navigable by move, keyboard, or arbitrary position.
-Chess rules and FEN state come from `chess.js`.
+Chess rules and FEN state come from `chess.js`. The current position can be
+analyzed with a self-hosted Stockfish 19 Lite WASM engine running entirely in a
+Web Worker. An explicit full-game review analyzes every position sequentially,
+classifies every played move, and reports independent White and Black accuracy.
 
 ## Scope
 
@@ -20,13 +25,23 @@ Implemented:
 - Interactive chessboard, player details, result, time control, opening and FEN
 - Previous / next / first / last / arbitrary-move navigation plus arrow keys
 - Castling, en passant, promotion, comments and custom starting FEN positions
+- Self-hosted Stockfish 19 Lite WASM analysis of the displayed position
+- UCI initialization/search/stop/quit with typed parsing and cancellation
+- White-perspective centipawn or mate evaluations, best move and PV
+- Depth 10 / 15 / 20 controls, progress display, CPU warning and retry
+- Explicit full-game analysis with Quick / Standard / Deep presets
+- N+1 sequential position searches using one shared engine instance
+- Engine WDL expected points with a documented centipawn fallback
+- Deterministic move labels and transparent White / Black accuracy
+- Progress, cancel, retry, stale-result rejection and move-by-move inspection
+- Move-list classification indicators tied to the selected game and settings
 
 Not implemented yet (planned for later phases):
 
-- Stockfish/WASM engine analysis
-- Move classifications, evaluations and accuracy
+- Evaluation graphs, interactive evaluation bars and advanced arrow annotations
+- Move-by-move opening explorer or online opening database
 - IndexedDB persistence and history dashboard
-- Authentication or user accounts
+- Authentication, accounts, sharing/social, cloud engine or paid APIs
 
 ## Chess.com import
 
@@ -128,6 +143,250 @@ skipped and older archives continue to be searched. Other failures stop the
 import and are shown in the panel. A failed Chess.com import never replaces a
 game already loaded in the viewer.
 
+## Local Stockfish analysis (Phase 3)
+
+### Engine and assets
+
+The engine is **Stockfish 19 Lite WASM**, single-threaded build, from the exact
+stable `stockfish@19.0.1` release (`nmrugg/stockfish.js`). The older
+`stockfish.js` npm package (latest `10.0.2`) was not used. The engine reports
+`Threads type spin default 1 min 1 max 1` and does not use `SharedArrayBuffer`.
+Its NNUE network is `nn-61e7af4bb97d.nnue`.
+
+Both downloaded files were verified against the originals in `~/Downloads` and
+copied unchanged into `public/engine/`. The JavaScript wrapper derives its WASM
+URL from its own path, so `new Worker("/engine/stockfish-19-lite-single.js")`
+loads the matching `stockfish-19-lite-single.wasm`. The wrapper also hard-codes
+the expected WASM length (`1845971`), which matches exactly. No CDN runtime
+fetch is used.
+
+| Asset | Size | SHA-256 |
+| --- | ---: | --- |
+| `public/engine/stockfish-19-lite-single.js` | 28,230 bytes | `ccb130d7ff29408531c47d859a49f91d59d4f482d05a53eb1a3231a4f624c91a` |
+| `public/engine/stockfish-19-lite-single.wasm` | 1,845,971 bytes | `ee4f115bdb2d32cadf96cada104a05b5ec257d7ad6f57582190b49bc71f096de` |
+
+### Runtime architecture
+
+- The React main thread never runs engine code. All UCI I/O happens in one
+  dedicated `Worker`.
+- `UciWorkerTransport` sends and receives string UCI lines and wires the
+  engine's `progressPort` through a `MessageChannel` for genuine WASM download
+  progress.
+- `StockfishEngineService` serializes searches, assigns request IDs, tracks
+  `info`/`bestmove` output, rejects stale responses, sends `stop` on abort, and
+  terminates the worker with `quit` on shutdown.
+- `acquireSharedEngine()` is a ref-counted singleton with delayed termination,
+  so React Strict Mode remounts reuse one worker.
+- `useEngineAnalysis(fen)` clears results when the displayed FEN changes and
+  uses a generation counter plus `AbortController` so navigation or unmount
+  cannot display another position's result.
+- `EngineAnalysisPanel` renders depth presets, loading/progress, stop,
+  evaluation, best move, principal variation, CPU warning and retry.
+
+Supported UCI traffic includes `uci`, `isready`, `ucinewgame`, `setoption`,
+`position startpos`, `position fen`, `go depth`, `go movetime`, `stop`, `quit`,
+`uciok`, `readyok`, `info`, `bestmove` and `info string` lines. The parser reads
+depth/seldepth, MultiPV, centipawn or mate scores, WDL counts when
+`UCI_ShowWDL` is enabled, nodes, NPS, hashfull, time and PV tokens. Scores are
+normalized to **White perspective**; mate scores stay distinct from centipawns.
+Best moves and the full PV are replayed with
+`chess.js`, including castling, en passant and promotion, and illegal or
+unparseable engine output is rejected.
+
+### Measured browser verification
+
+Local Chrome `157.0.8103.79` (headless) loaded the self-hosted assets from
+`127.0.0.1:8123` via `python3 -m http.server`, using a real Web Worker and real
+WASM. The following are measured values, not estimates:
+
+| Phase | Measured time |
+| --- | ---: |
+| `uciok` | 120 ms |
+| `readyok` | 120 ms |
+| WASM download progress reached 100% | 122 ms |
+| Search, depth 10 | 21 ms |
+| Search, depth 15 | 72 ms |
+| Search, depth 20 | 354 ms |
+
+| Depth | Best move | Score (White) | Nodes |
+| ---: | --- | --- | ---: |
+| 10 | `e2e4` | `cp 31` | 9,492 |
+| 15 | `e2e4` | `cp 36` | 54,002 |
+| 20 | `e2e4` | `cp 29` | 347,410 |
+
+The main-thread interval continued during the searches (`uiTicks: 56`,
+`searchTicks: 45`), so the browser remained responsive. A separate production
+`next start` check imported `[Event "Browser smoke"] ... 1. e4 e5 2. Nf3 Nc6 *`
+through the UI and clicked **Analyze position**; the panel showed `+0.31`,
+`Depth 10`, best move `e4 (e2e4)` and the PV `1. e4 c5 2. Nf3 Nc6 3. Nc3 e6
+4. d4 cxd4 5. Nxd4` in 109 ms. These numbers describe one warm local machine;
+deeper searches are device-dependent.
+
+### Engine license
+
+The engine is **GPL-3.0**, not MIT. `public/engine/ENGINE_LICENSES.md` records
+provenance, exact version, hashes, source links and distribution obligations,
+and `public/engine/COPYING.txt` contains the full GNU GPL v3 text. The
+JavaScript header and WASM binary were not modified. Vendored engine code is
+excluded from ESLint because it is third-party generated/distributed code. If
+you publicly distribute this application with these assets, provide the
+Corresponding Source for `stockfish@19.0.1` / Stockfish 19 as described in that
+document.
+
+## Full-game review (Phase 4)
+
+### Position strategy and engine use
+
+Full-game analysis is a separate, explicit action. Importing a game never
+starts it automatically. The runner (`src/lib/analysis/full-game-service.ts`)
+does the following:
+
+1. Replays the imported game once from its real `initialFen` with `chess.js`.
+   A game with `N` plies becomes exactly `N + 1` positions: the starting
+   position plus every position after a played move.
+2. Handles standard and custom starting FEN, black-to-move starts, promotion,
+   castling, en passant, checkmate, stalemate, other draws and resignation
+   games. Terminal positions are recognized from the board, not from the PGN
+   result alone.
+3. Sends every position to the **same** `StockfishEngineService` instance,
+   one `analyzePosition` call at a time. There is no worker per move and no
+   overlapping search; a run guard rejects concurrent full runs with
+   `already-running`.
+4. Uses presets **Quick = depth 12**, **Standard = depth 15**, and
+   **Deep = depth 18**. `MultiPV` is 1 for this phase, but depth and MultiPV
+   remain configurable through the existing engine API.
+5. Reports progress after initialization and every position: status,
+   analyzed/total positions, current ply and FEN, percent, elapsed time,
+   engine download percentage and engine name.
+6. Supports cancellation with `AbortController` + `stop()`, safe retry after
+   failure, and a full-FEN cache. The cache is intentionally conservative:
+   repeated piece placement is **not** reused when halfmove/fullmove counters
+   differ.
+7. Rejects stale results using analysis identity (game id, initial FEN, played
+   moves, preset, depth, MultiPV and expected-points/classification settings),
+   generation counters and a keyed React host. Changing game or preset
+   remounts the analysis state, aborts old work and prevents an old result
+   from appearing under a new game.
+
+Every played move receives SAN, UCI, FEN before/after, evaluations before/after
+with White-perspective score, side to move, depth, PV, best move, engine stats,
+classification, expected-points loss and tactical metadata. Mate and
+centipawn scores remain distinct all the way through the typed result.
+
+Deeper analysis examines more nodes per position and takes longer. Timing is
+hardware- and search-condition-dependent, so results may differ between
+devices. The UI states this explicitly and never starts analysis on import.
+
+### Expected points and `UCI_ShowWDL`
+
+The bundled Stockfish 19 Lite build supports `UCI_ShowWDL`. The service enables
+it during initialization before `isready`, so the first search already carries
+WDL. UCI reports `wdl w d l` as per-mille counts **from the side to move's
+perspective**. Expected points are computed centrally in
+`src/lib/analysis/expected-points.ts`:
+
+```text
+sideToMoveExpected = (win + draw / 2) / (win + draw + loss)
+whiteExpected      = sideToMoveExpected       if White is to move
+whiteExpected      = 1 - sideToMoveExpected   if Black is to move
+```
+
+Measured UCI examples:
+
+| Position | UCI WDL | Interpretation |
+| --- | --- | --- |
+| Starting position, White to move | `wdl 56 938 6` | White expected `0.525` |
+| After `1.e4`, Black to move | `wdl 14 962 24` | Black expected `0.495`, White `0.505` |
+
+An earlier interpretation of the second line as `0.75` was wrong and was
+corrected: the counts belong to the side to move, not to White.
+
+If WDL is absent or disabled, the configurable centipawn fallback is used:
+
+```text
+expected = 1 / (1 + exp(-slope * whiteCentipawns))
+```
+
+The default `slope` is `0.00368208` (approximately matching Stockfish WDL near
+small advantages); `+29` cp gives about `0.527`. Values are clamped to `[0, 1]`.
+Mate scores are kept exact (`+mate → 1`, `-mate → 0`, and side-to-move checkmate
+mapped from the FEN). Invalid or missing data falls back to `0.5`, never to
+`NaN`, `Infinity` or a fabricated evaluation. Player-specific expected points
+are obtained by converting White's value for Black (`1 - whiteExpected`).
+
+### Deterministic classification
+
+Labels come from our own documented heuristics, not from Stockfish. Thresholds
+are expected-points losses unless otherwise stated. The first matching rule
+wins:
+
+| Priority | Rule | Label | Condition |
+| ---: | --- | --- | --- |
+| 1 | Forced move | Best | Only one legal move; no alternative can be evaluated |
+| 2 | Missed win | Missed win | Before ≥ `0.90`, after ≤ `0.60`, loss ≥ `0.28`; not uncertain |
+| 3 | Blunder | Blunder | Loss ≥ `0.32` |
+| 4 | Mistake | Mistake | Loss ≥ `0.16` |
+| 5 | Inaccuracy | Inaccuracy | Loss ≥ `0.07` |
+| 6 | Brilliant sacrifice | Brilliant | Engine best, not forced/recapture/promotion, material delta ≤ `-2`, loss ≤ `0.08`, after ≥ `0.60`, gain ≥ `0.08` or after ≥ `0.85`; not uncertain |
+| 7 | Great tactical move | Great | Engine best, not recapture, loss ≤ `0.08`, before ≤ `0.85`, after ≥ `0.75`, gain ≥ `0.10`, and capture/promotion/check or ≥ `25` legal moves; not uncertain |
+| 8 | Engine best | Best | Matches the top move and loss ≤ `0.02` |
+| 9 | Excellent | Excellent | Loss ≤ `0.05` |
+| 10 | Otherwise | Good | No stronger positive or negative rule matched |
+
+Negative thresholds are multiplied by `1.5` when an evaluation is uncertain
+(missing best move/score or shallower than requested), and special positive
+labels plus missed win are withheld. Brilliant requires a conservative
+material commitment and a favorable/improving evaluation; ordinary recaptures,
+forced moves and unresolved sacrifices never receive it. **Book** remains in
+the type but is deferred because the app has PGN-level opening metadata, not a
+move-by-move opening database.
+
+### Accuracy
+
+Accuracy is transparent and independent per player; it is not a copy of
+Chess.com's proprietary formula. For each player:
+
+```text
+countedMoves = non-forced moves by that player
+loss_i       = max(0, expectedPointsBefore_i - expectedPointsAfter_i)
+accuracy     = 100 * (1 - sum(loss_i) / countedMoves)
+```
+
+`expectedPointsBefore` and `expectedPointsAfter` are converted to the mover's
+perspective. Forced moves are skipped and reported separately. A player with
+zero counted moves gets `100%`. Results are clamped to `0–100%`. Mate,
+short games and resignation use the evaluated position values; no synthetic
+loss is added.
+
+### UI and reliability
+
+`FullGameAnalysisPanel` provides the explicit **Analyze full game** / **Analyze
+again** action, preset buttons, an `aria-live` progress region with analyzed
+count and cancel button, retry on error, White/Black accuracy, classification
+counts, duration/warning text, and a selected-move inspector with eval before,
+eval after, best move, loss, SAN/UCI PV and reasons. `MoveList` shows compact
+classification indicators for analyzed moves and keeps them tied to the
+selected game through the keyed host.
+
+### Measured browser verification (Phase 4)
+
+A production `next start` build on `127.0.0.1:3001` was driven with Chrome
+`157.0.8103.79` headless via Chrome DevTools Protocol. A complete 20-ply PGN
+ending `1-0` was pasted through the real UI. The pre-analysis panel showed
+`Not started`, confirming there was no auto-start. After choosing **Quick · 12**
+and clicking **Analyze full game**, the panel reported:
+
+```text
+WHITE ACCURACY 99.9%
+BLACK ACCURACY 99.7%
+20 moves · 21 positions · 12 depth · 804 ms
+```
+
+The engine identity was `Stockfish 19 Lite WASM`, and the page loaded
+`/engine/stockfish-19-lite-single.js` as a real Worker asset. Move-list
+indicators (`★` / `✓`) were present. A repeat run completed in `874 ms`.
+These are warm local-machine measurements; deeper presets take longer.
+
 ## Requirements
 
 - Node.js 22.12+, 24+, or 26+ (Vitest 5 requirement; Next.js 16 needs 20.9+)
@@ -166,7 +425,7 @@ pnpm build      # production build
 pnpm start      # run the production build
 pnpm lint       # ESLint
 pnpm typecheck  # TypeScript (strict, no emit)
-pnpm test       # unit and integration tests (mocked HTTP)
+pnpm test       # unit and integration tests (mocked HTTP and Worker I/O)
 ```
 
 ## Architecture
@@ -179,10 +438,12 @@ src/
   components/
     ui/                           local Button, Card, Badge, Alert, Textarea
     import/                       import tabs, PGN entry and multi-game picker
-    game/                         board, move list, metadata and navigation
+    game/                         board, move list, metadata, navigation, engine panels
     analysis-workspace.tsx        preserves loaded game while import panel is open
   hooks/
     use-game-viewer.ts            ply state and navigation callbacks
+    use-engine-analysis.ts        worker-backed single-position analysis state
+    use-full-game-analysis.ts     full-game run state, abort and generation guards
   lib/
     chess/
       types.ts                    normalized game, move and metadata types
@@ -202,8 +463,24 @@ src/
       pgn-import-service.ts       shared import orchestration and result union
       chesscom-import-client.ts   browser helper for the local server route
       file-reading.ts             browser file validation and reading
-    engine/types.ts               EngineService interface (Phase 3 integration point)
-    analysis/types.ts             analysis result types (Phase 4 integration point)
+    engine/
+      types.ts                    engine, UCI, evaluation and progress contracts
+      errors.ts                   stable engine error codes
+      uci.ts                      typed UCI parsing and score normalization
+      chess-moves.ts              chess.js move/PV validation
+      worker-transport.ts         Worker string transport and download progress
+      stockfish-service.ts        serialized UCI service, abort and WDL parsing
+      shared-engine.ts            ref-counted Strict Mode-safe worker lifecycle
+    analysis/
+      types.ts                    full-game, position, move and accuracy contracts
+      settings.ts                 presets, thresholds and analysis identity
+      positions.ts                N+1 replay from the real initial FEN
+      expected-points.ts          WDL/logistic expected points and perspectives
+      classification.ts           deterministic labels and priority order
+      accuracy.ts                 independent player accuracy formula
+      full-game-service.ts        sequential runner, progress, cache and guards
+      labels.ts                   shared UI labels and symbols
+      errors.ts                   stable full-game error codes
   tests/                          Vitest unit and integration tests
 ```
 
@@ -220,6 +497,9 @@ internal normalized game types.
   `tailwind-merge`, Radix Slot and Lucide icons.
 - **`chess.js` (BSD-2-Clause)** for PGN parsing, FEN and legality.
 - **`react-chessboard` (MIT)** for the board; no Chessground GPL dependency.
+- **Stockfish 19 Lite WASM (GPL-3.0)** self-hosted from `stockfish@19.0.1`. It
+  runs as one shared, single-threaded Worker; the React main thread never
+  searches, and no engine assets come from a CDN.
 - **One import pipeline.** Chess.com retrieval only produces a PGN and source
   metadata; parsing, multi-game handling and viewing stay shared with Phase 1.
 - **No arbitrary fetch URL.** The browser calls a local typed route; the server
@@ -230,7 +510,8 @@ internal normalized game types.
 
 Runtime: `next`, `react`, `react-dom`, `chess.js`, `react-chessboard`,
 `clsx`, `tailwind-merge`, `class-variance-authority`, `@radix-ui/react-slot`,
-`lucide-react`.
+`lucide-react`, plus the self-hosted GPL-3.0 engine files in `public/engine/`
+(not npm dependencies).
 
 Development: `typescript`, `eslint`, `eslint-config-next`, `tailwindcss`,
 `@tailwindcss/turbopack`, `@types/*`, `vitest`, `jsdom`,
@@ -238,19 +519,39 @@ Development: `typescript`, `eslint`, `eslint-config-next`, `tailwindcss`,
 
 ## Testing and verification
 
-`pnpm typecheck`, `pnpm lint`, `pnpm test` (**77 tests**) and `pnpm build` all
-pass. Automated tests mock all external HTTP requests; they never depend on the
-live Chess.com API. Coverage includes URL/username validation, archive ordering
-and exact-ID matching, missing variants/PGNs, upstream 404/410/429/5xx,
-timeouts, invalid JSON, route status mapping, successful Chess.com import into
-the existing viewer, move navigation, continued PGN import, and preservation of
-a loaded game after a failed import.
+`pnpm typecheck`, `pnpm lint`, `pnpm test` (**22 files, 137 tests**) and
+`pnpm build` all pass. Automated tests mock external HTTP and Worker I/O; they
+never depend on the live Chess.com API or a bundled engine binary. Coverage
+includes URL/username validation, archive ordering and exact-ID matching,
+missing variants/PGNs, upstream 404/410/429/5xx, timeouts, invalid JSON, route
+status mapping, successful Chess.com import into the existing viewer, move
+navigation, continued PGN import, and preservation of a loaded game after a
+failed import. Engine tests cover UCI line parsing, WDL parsing, score
+normalization, mocked-Worker initialization/search/stop/termination/retry,
+MultiPV, black-to-move scores, mate scores, promotion/castling/en passant
+validation, illegal output, Strict Mode-style remounts, navigation stale-result
+rejection, and panel controls.
 
-A live production-server integration check was also performed against the
-official API: `POST /api/import/chesscom` with
+Phase 4 tests additionally cover N+1 position generation from standard and
+custom FEN, black-to-move starts, short/long games, terminal positions,
+WDL/centipawn/mate expected points and perspective conversion, every
+classification threshold and priority, conservative full-FEN caching, sequential
+searches with no overlap, progress emission, cancellation, engine failure and
+retry, reanalysis, game switching, stale-result rejection, explicit-no-autostart
+UI controls, progress/cancel rendering, accuracy/counts summary and selected-move
+inspection.
+
+A live production-server integration check was performed against the official
+API: `POST /api/import/chesscom` with
 `https://www.chess.com/game/live/184727190848` and username `hikaru` returned
 HTTP 200 with the exact game ID, `rules: "chess"`, and a 3,619-character PGN
-that passed the existing parser.
+that passed the existing parser. The real browser WASM checks described in
+[Local Stockfish analysis](#local-stockfish-analysis-phase-3) used both a local
+static server and the production `next start` build with the actual UI. The
+Phase 4 full-game check described in
+[Full-game review](#full-game-review-phase-4) also used the production build
+and the actual import/review UI with the local Stockfish WASM worker; mocks
+alone were not treated as completion evidence.
 
 ## Known limitations
 
@@ -269,8 +570,24 @@ that passed the existing parser.
 - PGN comments are shown for the move they follow; variations are ignored by
   the viewer (the mainline is analyzed).
 - No persistence: refreshing the page clears the loaded game.
-- Engine evaluation, move classifications and accuracy are intentionally absent
-  until their planned phases.
+- The single-position engine panel still follows the displayed position;
+  navigating clears that panel's evaluation, best move and PV. Full-game review
+  results stay attached to the loaded game and settings until they change.
+- Full-game analysis uses `MultiPV 1`. With only one principal variation,
+  complexity heuristics for Great moves are intentionally conservative.
+- Book classification is deferred: PGN headers may name an opening, but there
+  is no local move-by-move opening database to justify a Book move.
+- Accuracy and labels use the documented formulas/heuristics above; they are
+  not Chess.com's proprietary values. Uncertain, shallow or incomplete
+  engine data withholds special labels.
+- Evaluation graphs, interactive evaluation bars, advanced arrows/annotations,
+  opening explorer, online databases, accounts, cloud engine, paid APIs,
+  subscriptions, sharing/social and IndexedDB are out of scope.
+- Search time is device-dependent. Full-game Deep analysis and single-position
+  Depth 20 can take noticeably longer on slower CPUs;
+  slower CPUs; the single-threaded build does not use `SharedArrayBuffer`.
+- The engine is GPL-3.0 and self-hosted; public redistribution must satisfy the
+  source-notice obligations in `public/engine/ENGINE_LICENSES.md`.
 
 ## Disclaimer
 

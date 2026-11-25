@@ -15,6 +15,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useGameViewer } from "@/hooks/use-game-viewer";
+import {
+  createAnalysisSettings,
+  type SelectablePreset,
+} from "@/lib/analysis/settings";
 import type { PositionStatus } from "@/lib/chess/game-navigation";
 import type {
   GameMetadata,
@@ -22,6 +26,12 @@ import type {
   NormalizedGame,
   PlayerInfo,
 } from "@/lib/chess/types";
+import { EngineAnalysisPanel } from "./engine-analysis-panel";
+import {
+  FullGameReviewHost,
+  fullGameReviewKey,
+} from "./full-game-review-host";
+import { FullGameAnalysisPanel } from "./full-game-analysis-panel";
 import { GameMetadata as GameMetadataCard } from "./game-metadata";
 import { MoveList } from "./move-list";
 import { NavigationControls } from "./navigation-controls";
@@ -101,6 +111,13 @@ export function GameViewer({
 }) {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [copiedFen, setCopiedFen] = useState<string | null>(null);
+  const [analysisPreset, setAnalysisPreset] =
+    useState<SelectablePreset>("standard");
+  const analysisSettings = useMemo(
+    () => createAnalysisSettings(analysisPreset),
+    [analysisPreset],
+  );
+  const analysisKey = fullGameReviewKey(game, analysisSettings);
   const viewer = useGameViewer(game);
   const copied = copiedFen === viewer.fen;
   const turn = viewer.fen.split(" ")[1] === "w" ? "w" : "b";
@@ -313,12 +330,27 @@ export function GameViewer({
         </Card>
 
         <div className="space-y-5">
-          <GameMetadataCard game={game} turn={turn} />
-          <MoveList
-            moves={game.moves}
-            currentPly={viewer.currentPly}
-            onSelect={viewer.goTo}
-          />
+          <FullGameReviewHost key={analysisKey} game={game} settings={analysisSettings}>
+            {(fullAnalysis) => (
+              <>
+                <FullGameAnalysisPanel
+                  settings={analysisSettings}
+                  preset={analysisPreset}
+                  onPresetChange={setAnalysisPreset}
+                  selectedPly={viewer.currentPly}
+                  analysis={fullAnalysis}
+                />
+                <EngineAnalysisPanel fen={viewer.fen} />
+                <GameMetadataCard game={game} turn={turn} />
+                <MoveList
+                  moves={game.moves}
+                  currentPly={viewer.currentPly}
+                  onSelect={viewer.goTo}
+                  analysis={fullAnalysis.result}
+                />
+              </>
+            )}
+          </FullGameReviewHost>
         </div>
       </div>
     </section>

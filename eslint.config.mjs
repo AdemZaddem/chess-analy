@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored GPL engine build; do not lint generated third-party code.
+    "public/engine/**",
   ]),
 ]);
 

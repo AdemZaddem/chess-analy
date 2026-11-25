@@ -4,7 +4,16 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { CLASSIFICATION_LABELS, type ClassificationTone } from "@/lib/analysis/labels";
+import type { FullGameAnalysis } from "@/lib/analysis/types";
 import type { MoveRecord } from "@/lib/chess/types";
+
+const toneClasses: Record<ClassificationTone, string> = {
+  neutral: "text-muted",
+  success: "text-accent",
+  violet: "text-violet",
+  warning: "text-amber-200",
+};
 
 interface MoveRow {
   number: number;
@@ -16,11 +25,21 @@ export function MoveList({
   moves,
   currentPly,
   onSelect,
+  analysis,
 }: {
   moves: MoveRecord[];
   currentPly: number;
   onSelect: (ply: number) => void;
+  analysis?: FullGameAnalysis | null;
 }) {
+  const classifications = useMemo(
+    () =>
+      new Map(
+        (analysis?.moves ?? []).map((move) => [move.ply, move.classification]),
+      ),
+    [analysis],
+  );
+
   const rows = useMemo<MoveRow[]>(() => {
     const result: MoveRow[] = [];
     for (let index = 0; index < moves.length; index += 2) {
@@ -36,6 +55,10 @@ export function MoveList({
   function MoveButton({ move }: { move?: MoveRecord }) {
     if (!move) return <span className="h-8" />;
     const active = currentPly === move.ply;
+    const classification = classifications.get(move.ply);
+    const meta = classification
+      ? CLASSIFICATION_LABELS[classification]
+      : undefined;
 
     return (
       <button
@@ -43,13 +66,25 @@ export function MoveList({
         onClick={() => onSelect(move.ply)}
         aria-current={active ? "step" : undefined}
         className={cn(
-          "h-8 min-w-0 flex-1 truncate rounded-md px-2 text-left font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
+          "flex h-8 min-w-0 flex-1 items-center gap-1 rounded-md px-2 text-left font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
           active
             ? "bg-accent font-semibold text-emerald-950"
             : "text-ink hover:bg-surface-3",
         )}
       >
-        {move.san}
+        <span className="truncate">{move.san}</span>
+        {meta ? (
+          <span
+            className={cn(
+              "shrink-0 font-sans text-[10px] font-bold",
+              active ? "text-emerald-950" : toneClasses[meta.tone],
+            )}
+            title={`${meta.label} move`}
+            aria-label={`${meta.label} move`}
+          >
+            {meta.symbol}
+          </span>
+        ) : null}
       </button>
     );
   }

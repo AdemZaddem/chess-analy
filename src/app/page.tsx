@@ -15,15 +15,15 @@ const features = [
   },
   {
     icon: ChartNoAxesCombined,
-    title: "Built for deeper analysis",
+    title: "Local engine analysis",
     description:
-      "A clean, accurate move viewer prepares your games for the engine-analysis features planned for the next phases.",
+      "Analyze one position or the whole game with self-hosted Stockfish 19 Lite WASM in a Web Worker. Choose depth presets and review every move.",
   },
   {
     icon: ShieldCheck,
     title: "Private by default",
     description:
-      "No account, no upload to a server, no tracking. Your games stay in your browser.",
+      "No account, no upload to a server, no tracking. Imports and engine analysis stay in your browser.",
   },
 ];
 
@@ -39,7 +39,7 @@ export default function Home() {
             MoveLens
           </span>
         </div>
-        <Badge variant="success">Phase 1 · PGN viewer</Badge>
+        <Badge variant="success">Phase 4 · Full-game review</Badge>
       </header>
 
       <section className="mx-auto mt-14 max-w-3xl text-center sm:mt-20">
@@ -49,9 +49,9 @@ export default function Home() {
           <span className="text-accent">move by move.</span>
         </h1>
         <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
-          Import a PGN and replay every position with a clear move list, game
-          details and accurate navigation. A professional workspace for
-          understanding the games you already played.
+          Import a PGN, replay every position with accurate navigation, then
+          analyze one position or the whole game with a local Stockfish engine.
+          A clean workspace for understanding the games you already played.
         </p>
       </section>
 
@@ -79,7 +79,7 @@ export default function Home() {
 
       <footer className="mt-12 flex flex-col gap-2 border-t border-line-soft pt-6 text-xs text-muted/80 sm:flex-row sm:items-center sm:justify-between">
         <p>MoveLens · A free, local-first chess analysis workspace.</p>
-        <p>Engine evaluation and move classifications arrive in later phases.</p>
+        <p>Local single-position and full-game engine analysis.</p>
       </footer>
     </main>
   );
